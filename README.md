@@ -1,16 +1,12 @@
-# Obsidian Discord Bot
+# GMBot
 
-A Discord bot that saves messages to your Obsidian vault with intelligent file naming and formatting options based on the message content and the user's reactions.
+A Discord bot logs Discord messages into an Obsidian file to be used as reference for an LLM GM
 
 ## Features
-- Auto-reacts to messages in the designated channel
-- Intelligent file naming based on content
-- Creates formatted daily notes with timestamps
-- Preserves attachments as markdown links
-- Confirms successful saves with reactions
-- Docker support for easy deployment
+- Log all Discord messages in a particular channel to an Obsidian File, broken up by scene.
+- Command to change scene - pending
 
-## Setup
+## Setup - TO UPDATE
 
 1. Create a `.env` file with the following variables:
    ```env-example
@@ -33,19 +29,13 @@ A Discord bot that saves messages to your Obsidian vault with intelligent file n
     # This should match exactly (case-sensitive)
     BOT_CHANNEL_NAME=your_channel_name
 
-    # Name of your custom save emoji (without the : characters)
-    # Example: If your emoji is :obsidian:, just put obsidian
-    SAVE_EMOJI_NAME=obsidian
-
     # Optional: Section in daily notes where content should be appended
     # If specified, new content will be added under this section header
     # Example: "Daily Log" will append content under "# Daily Log" or "## Daily Log"
-    DAILY_NOTE_SECTION=Daily Log
+    CUREENT_SCENE=Scene_1
    ```
 
-2. Add a custom emoji named `:obsidian:` to your Discord server (you can change this to whatever you want in the `.env`)
-
-3. Create a channel with the name you specified in `BOT_CHANNEL_NAME`
+2. Create a channel with the name you specified in `BOT_CHANNEL_NAME`
 
 ## Deployment
 
@@ -73,7 +63,7 @@ A Discord bot that saves messages to your Obsidian vault with intelligent file n
 3. Run the container:
    ```bash
    docker run -d \
-     --name obsidian-discord \
+     --name GMBot \
      -v /path/to/your/vault:/vault \
      --env-file .env \
      ghcr.io/yourusername/obsidian-discord:latest
@@ -82,22 +72,22 @@ A Discord bot that saves messages to your Obsidian vault with intelligent file n
 #### Building Locally
 1. Build the container:
    ```bash
-   docker build -t obsidian-discord-bot .
+   docker build -t GMBot .
    ```
 
 2. Run the container:
    ```bash
    docker run -d \
-     --name obsidian-discord \
+     --name GMBot \
      -v /path/to/your/vault:/vault \
      --env-file .env \
-     obsidian-discord-bot
+     GMBot
    ```
 
 #### Using Docker Compose
 1. Download the `docker-compose.yml` file:
    ```bash
-   curl -O https://raw.githubusercontent.com/sloraris/obsidian-discord/main/example.compose.yml docker-compose.yml
+   curl -O https://raw.githubusercontent.com/leathermartini/GMBot/main/example.compose.yml docker-compose.yml
    ```
 
 2. Edit the `OBSIDIAN_VAULT_PATH` in `.env` to match your local vault path
@@ -110,75 +100,9 @@ A Discord bot that saves messages to your Obsidian vault with intelligent file n
 ## Usage
 
 1. Send a message in your bot's channel
-2. The bot will automatically react with available options:
-   - 📝 Create a new note
-   - 📅 Add to daily note (default)
-   - More options coming soon...
-
-3. Select the option you want to use by reacting with the corresponding emoji
-4. When you're ready, react to the message with the `:obsidian:` emoji to save the message to Obsidian
-5. The bot will process the message based on your other reactions:
-   - If you selected 📝, it creates a new note
-   - Otherwise, it adds to today's daily note (it will create a new daily note if one does not already exist)
-6. The bot confirms success with ✅ or failure with ❌
-
-## Note Formats
-
-### Daily Note (`YYYY-MM-DD.md`)
-The bot now respects your Obsidian Daily Notes plugin settings for:
-- Note location (folder)
-- Filename format
-- Template file
-
-If `DAILY_NOTE_SECTION` is set, content will be appended under that section:
-```markdown
-# Thursday, March 14, 2024
-
-## Daily Log
-
----
-## 14:30
-
-Your message content here...
-
----
-## 15:45
-
-Another message content...
-
-## Other Section
-Other content...
-```
-
-If `DAILY_NOTE_SECTION` is not set, content will be appended to the end of the file:
-```markdown
-# Thursday, March 14, 2024
-
----
-## 14:30
-
-Your message content here...
-
----
-## 15:45
-
-Another message content...
-```
-
-### New Note
-The filename is automatically generated from the message's H1 heading:
-
-If your message starts with:
-```markdown
-# My Project Ideas
-Some great ideas here...
-```
-
-It will be saved as `my-project-ideas.md`. If no H1 is found, it falls back to `discord_YYYYMMDDHHMMSS.md`.
-
-If a file with the same name exists, a number is appended (e.g., `my-project-ideas-1.md`).
+2. The bot will automatically save the message to the Obsidian vault, in the current scene.
 
 ## Coming Soon
-- Support for saving notes to different folders
-- Custom templates
-- More default note actions
+- Update Scene
+- Template for Obsidian file
+- Add most of .env info into Obsidian file as a "config" page
