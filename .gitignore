@@ -45,3 +45,6 @@ docker-compose.override.yml
 # Local development
 *.local
 .local/
+
+# Settings file
+gmbot.json

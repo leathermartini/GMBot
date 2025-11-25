@@ -17,47 +17,86 @@ intents.guilds = True
 intents.members = False
 intents.presences = False
 
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = discord.Bot(intents=intents)
+
+@bot.command(description="Starts a new scene, changing the logging file.")
+async def scene(ctx, new_scene: discord.Option(str)): #Creates slash command /scene
+    current_settings['Current Scene'] = new_scene
+    write_gmbot_settings()
+    await ctx.respond(f"--------------------- {new_scene} ---------------------")
+
+#bot = discord.Client(intents=intents)
+
 
 # Constants
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-ALLOWED_GUILD_IDS = os.getenv('ALLOWED_GUILD_IDS')
-OBSIDIAN_VAULT_PATH = os.getenv('OBSIDIAN_VAULT_PATH')
-BOT_CHANNEL_NAME = os.getenv('BOT_CHANNEL_NAME')
-CURRENT_SCENE = os.getenv('CURRENT_SCENE')
+# DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+# ALLOWED_GUILD_IDS = os.getenv('ALLOWED_GUILD_IDS')
+# OBSIDIAN_VAULT_PATH = os.getenv('OBSIDIAN_VAULT_PATH')
+# BOT_CHANNEL_NAME = os.getenv('BOT_CHANNEL_NAME')
+# CURRENT_SCENE = os.getenv('CURRENT_SCENE')
+# DEBUG_ON = False
+
+def debug_message(message, debug_log=False):
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+    file_path = "Settings/Debug Log.md"
+    formatted_content = f"{current_time}: {message}"
+    print(formatted_content)
+    if debug_log:
+        try:
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(formatted_content)
+            return
+        except Exception as e:
+            print(f"Error writing debug log: {e}")
+            # Fallback to simple append if anything goes wrong
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(formatted_content)
 
 def get_formatted_date():
     """Get today's date in a readable format for H1."""
     return datetime.now().strftime('%A, %B %d, %Y')
 
+def write_gmbot_settings():
+    # writes current settings to the gmbot.json file
+    try:
+        with open('gmbot.json', 'w') as configfile:
+                json.dump(current_settings, configfile)
+        debug_message('Wrote settings to config file', current_settings['debug'])
+    except Exception as err:
+        debug_message(f"Error writing config file: {Err}", current_settings['debug'])
+
 def get_gmbot_settings():
-    # Todo - work out settings in vault for now, returns defaults
-    vault_path = Path(OBSIDIAN_VAULT_PATH)
-    # settings_path = vault_path / '.obsidian' / 'daily-notes.json'
+    # Default settings
+    global current_settings
+    if 'current_settings' not in globals():
+        current_settings = {
+            'folder': 'Scenes',  # Root of vault
+            'format': 'YYYY-MM-DD',
+            'Settings Folder': 'Settings',
+            'template': 'Settings/Default Scene Template.md',
+            'debug': False,
+            # The following are pulled from globals
+            'Current Scene': os.getenv('CURRENT_SCENE'),
+            'Bot Channel': os.getenv('BOT_CHANNEL_NAME'),
+            'Allowed Guild ids': os.getenv('ALLOWED_GUILD_IDS'),
+            'Bot Discord Token': os.getenv('DISCORD_TOKEN'),
+            'Obsidian Vault Path': os.getenv('OBSIDIAN_VAULT_PATH')
+        }
+
+    try:
+        # Load the settings file
+        with open('gmbot.json', 'r') as configfile:
+            current_settings = json.load(configfile)
+        #Load settings into Globals.
+        debug_message('Found config file and loaded it.', current_settings['debug'])
+    except FileNotFoundError:
+        # Settings file doesn't exist, so create it.
+        write_gmbot_settings()
+        debug_message('No config file found, creating from defaults.', current_settings['debug'])
+    except Exception as err:
+        debug_message(f"Error reading GMBot config file: {err}", current_settings['debug'])
     
-
-    # Default settings if plugin not installed or configured
-    # May not use plugin above
-    default_settings = {
-        'folder': 'Scenes',  # Root of vault
-        'format': 'YYYY-MM-DD',
-        'template': 'Default Scene Template' + '.md'
-    }
-
-    #try:
-    #    if settings_path.exists():
-    #        print("Found daily notes settings file")
-    #        with open(settings_path, 'r', encoding='utf-8') as f:
-    #            settings = json.load(f)
-    #            return {
-    #                'folder': settings.get('folder', default_settings['folder']),
-    #                'format': settings.get('format', default_settings['format']),
-    #                'template': settings.get('template', default_settings['template'])
-    #            }
-    #except Exception as e:
-    #    print(f"Error reading Daily Notes settings: {e}")
-
-    return default_settings
+    return
 
 def format_date_for_filename(date_format):
     """Convert Obsidian's moment.js date format to Python's strftime format."""
@@ -80,48 +119,44 @@ def format_date_for_filename(date_format):
     return python_format
 
 def get_current_scene_path():
-    """Get the path to GMBot's notes using Obsidian's settings."""
-    settings = get_gmbot_settings()
-
     # Convert moment.js format to Python's strftime format
-    python_date_format = format_date_for_filename(settings['format'])
-    filename = f"{CURRENT_SCENE}.md"
+    python_date_format = format_date_for_filename(current_settings['format'])
+    filename = f"{current_settings['Current Scene']}.md"
 
     # Construct the full path
-    vault_path = Path(OBSIDIAN_VAULT_PATH)
-    if settings['folder']:
+    vault_path = Path(current_settings['Obsidian Vault Path'])
+    if current_settings['folder']:
         # Create the folder if it doesn't exist
-        print(f"GMBot Scene location specified, ensuring {vault_path}/{settings['folder']}/{filename} exists...")
-        folder_path = vault_path / settings['folder']
+        debug_message(f"GMBot Scene location specified, ensuring {vault_path}/{current_settings['folder']}/{filename} exists...", current_settings['debug'])
+        folder_path = vault_path / current_settings['folder']
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path / filename
     else:
-        print(f"No GMBot Scene directory specified. Defaulting to {vault_path}/{filename}...")
+        debug_message(f"No GMBot Scene directory specified. Defaulting to {vault_path}/{filename}...", current_settings['debug'])
         return vault_path / filename
     
 def parse_template_string(template_string):
     """Parse Templated strings to include scene names and dates"""
     # Replaces {date} with the current date
-    # Replaces {scene} with the value of CURRENT_SCENE
+    # Replaces {scene} with the value of current_settings['Current Scene']
     # Add end of line
-    return template_string.format(date=get_formatted_date(), scene=CURRENT_SCENE) + '\n'
+    return template_string.format(date=get_formatted_date(), scene=current_settings['Current Scene']) + '\n'
 
 def ensure_current_scene_exists(file_path):
     """Create the current scene if it doesn't exist, using template if available and enabled."""
     if not file_path.exists():
-        settings = get_gmbot_settings()
         template_content = ""
 
         # Try to load template if specified
-        if settings['template']:
-            template_path = Path(OBSIDIAN_VAULT_PATH) / settings['template']
+        if current_settings['template']:
+            template_path = Path(current_settings['Obsidian Vault Path']) / current_settings['template']
             try:
                 if template_path.exists():
                     with open(template_path, 'r', encoding='utf-8') as f:
                         template_content = f.read()
             except Exception as e:
-                print(f"Error reading template: {e}")
-            print(f"Current template string is: {template_content}")
+                debug_message(f"Error reading template: {e}", current_settings['debug'])
+            debug_message(f"Current template string is: {template_content}", current_settings['debug'])
             
         # If no template or template not found, use default
         if not template_content:
@@ -144,7 +179,7 @@ def append_to_scene(file_path, author, content):
             f.write(formatted_content)
         return
     except Exception as e:
-        print(f"Error modifying current scene: {e}")
+        debug_message(f"Error modifying current scene: {e}", current_settings['debug'])
         # Fallback to simple append if anything goes wrong
         with open(file_path, 'a', encoding='utf-8') as f:
             f.write(formatted_content)
@@ -160,9 +195,9 @@ def slugify(text):
 
 @bot.event
 async def on_guild_join(guild):
-    if guild.id not in ALLOWED_GUILD_IDS:
+    if guild.id not in current_settings['Allowed Guild ids']:
         await guild.leave()
-        print(f"Left unauthorized server: {guild.name} ({guild.id})")
+        debug_message(f"Left unauthorized server: {guild.name} ({guild.id})", current_settings['debug'])
 
 async def update_bot_status(status_type="default"):
     """Update bot status based on current action."""
@@ -199,13 +234,13 @@ async def on_ready():
 
     # List all guilds bot has successfully joined
     for guild in bot.guilds:
-        print(f'{bot.user} has connected to {guild.name}')
-    print(f'{bot.user} is connected to {len(bot.guilds)} guild(s)')
+        debug_message(f'{bot.user} has connected to {guild.name}', current_settings['debug'])
+    debug_message(f'{bot.user} is connected to {len(bot.guilds)} guild(s)', current_settings['debug'])
 
 @bot.event
 async def on_message(message):
     # Only process messages in the bot's assigned channel
-    if message.channel.name == BOT_CHANNEL_NAME and not message.author.bot:
+    if message.channel.name == current_settings['Bot Channel'] and not message.author.bot:
         try:
             # Format the base content
             base_content = message.content
@@ -215,25 +250,26 @@ async def on_message(message):
                 base_content += f"\n\nAttachments:\n" + "\n".join(f"- {link}" for link in attachment_links)
             # Default to daily note
             await update_bot_status("saving")
-            print(f"Adding message {message.id} content to current scene")
+            debug_message(f"Adding message {message.id} content ({message.content}) to current scene", current_settings['debug'])
             current_scene_path = get_current_scene_path()
             ensure_current_scene_exists(current_scene_path)
-            append_to_scene(current_scene_path, message.author, base_content)    
+            append_to_scene(current_scene_path, message.author.display_name, base_content)    
             # Add complete emoji reaction and reset status
-            await message.add_reaction('✅')
+            if current_settings['debug']:
+                await message.add_reaction('✅')
             await update_bot_status()
         except Exception as e:
-            print(f"Error processing message: {e}")
+            debug_message(f"Error processing message: {e}", current_settings['debug'])
             await message.add_reaction('❌')
             await update_bot_status()  # Reset status in case of error
 
-
 # Run the bot
 if __name__ == "__main__":
-    if not DISCORD_TOKEN:
+    get_gmbot_settings()
+    if not current_settings['Bot Discord Token']:
         raise ValueError("Discord token not found in .env file")
-    if not OBSIDIAN_VAULT_PATH:
+    if not current_settings['Obsidian Vault Path']:
         raise ValueError("Obsidian vault path not found in .env file")
 
-    print("Bot is starting...")
-    bot.run(DISCORD_TOKEN)
+    debug_message("Bot is starting...", current_settings['debug'])
+    bot.run(current_settings['Bot Discord Token'])
