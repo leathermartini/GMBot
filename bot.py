@@ -19,14 +19,25 @@ intents.presences = False
 
 bot = discord.Bot(intents=intents)
 
-@bot.command(description="Starts a new scene, changing the logging file.")
+gmbot_commands = bot.create_group('gmbot', 'GMBot Commands')
+
+@gmbot_commands.command(description="Starts a new scene, changing the logging file.")
 async def scene(ctx, new_scene: discord.Option(str)): #Creates slash command /scene
     current_settings['Current Scene'] = new_scene
+    current_settings['Current Scene Start'] = datetime.now().strftime(current_settings['format'])
     write_gmbot_settings()
     await ctx.respond(f"--------------------- {new_scene} ---------------------")
 
-#bot = discord.Client(intents=intents)
-
+@gmbot_commands.command(description="Toggles debugging to the Obsidian vault, in the Settings folder.")
+async def debug(ctx): #Creates slash command /gmbdebug
+    debug_message('Toggling debug value')
+    current_settings['debug'] = not current_settings['debug'] 
+    if current_settings['debug']:
+        message = 'Debug turned on.'
+    else:
+        message = 'Debug turned off.'
+    write_gmbot_settings()
+    await ctx.respond(message)
 
 # Constants
 # DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -38,19 +49,21 @@ async def scene(ctx, new_scene: discord.Option(str)): #Creates slash command /sc
 
 def debug_message(message, debug_log=False):
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-    file_path = "Settings/Debug Log.md"
-    formatted_content = f"{current_time}: {message}"
+    file_path = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "Debug Log.md"
+    formatted_content = f"{current_time}: {message}\n"
     print(formatted_content)
     if debug_log:
         try:
             with open(file_path, 'a', encoding='utf-8') as f:
                 f.write(formatted_content)
             return
+        except FileNotFoundError:
+            # Write to create the file.
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write('GMBot Debug Log\n')
+                f.write(formatted_content)
         except Exception as e:
             print(f"Error writing debug log: {e}")
-            # Fallback to simple append if anything goes wrong
-            with open(file_path, 'a', encoding='utf-8') as f:
-                f.write(formatted_content)
 
 def get_formatted_date():
     """Get today's date in a readable format for H1."""
@@ -71,12 +84,13 @@ def get_gmbot_settings():
     if 'current_settings' not in globals():
         current_settings = {
             'folder': 'Scenes',  # Root of vault
-            'format': 'YYYY-MM-DD',
+            'format': '%Y-%m-%d %H-%M',
             'Settings Folder': 'Settings',
             'template': 'Settings/Default Scene Template.md',
             'debug': False,
             # The following are pulled from globals
             'Current Scene': os.getenv('CURRENT_SCENE'),
+            'Current Scene Start': '0000-00-00 00-00',
             'Bot Channel': os.getenv('BOT_CHANNEL_NAME'),
             'Allowed Guild ids': os.getenv('ALLOWED_GUILD_IDS'),
             'Bot Discord Token': os.getenv('DISCORD_TOKEN'),
@@ -98,30 +112,8 @@ def get_gmbot_settings():
     
     return
 
-def format_date_for_filename(date_format):
-    """Convert Obsidian's moment.js date format to Python's strftime format."""
-    # Basic conversion of common formats
-    format_map = {
-        'YYYY': '%Y',
-        'YY': '%y',
-        'MM': '%m',
-        'DD': '%d',
-        'HH': '%H',
-        'mm': '%M',
-        'ss': '%S'
-    }
-
-    # Replace each format token with its Python equivalent
-    python_format = date_format
-    for moment_fmt, py_fmt in format_map.items():
-        python_format = python_format.replace(moment_fmt, py_fmt)
-
-    return python_format
-
 def get_current_scene_path():
-    # Convert moment.js format to Python's strftime format
-    python_date_format = format_date_for_filename(current_settings['format'])
-    filename = f"{current_settings['Current Scene']}.md"
+    filename = f"{current_settings['Current Scene Start']} - {current_settings['Current Scene']}.md"
 
     # Construct the full path
     vault_path = Path(current_settings['Obsidian Vault Path'])
