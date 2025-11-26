@@ -1,6 +1,12 @@
+# GMBot
+# Current version
+# MUST INCREMENT WHEN current_settings structure changes.
+CURRENT_VERSION = 0.1
+
 import os
 import json
 import discord
+import requests
 from discord.ext import commands
 from datetime import datetime
 from pathlib import Path
@@ -80,9 +86,10 @@ def write_gmbot_settings():
 
 def get_gmbot_settings():
     # Default settings
-    global current_settings
     if 'current_settings' not in globals():
+        global current_settings 
         current_settings = {
+            'Settings Version': CURRENT_VERSION,
             'folder': 'Scenes',  # Root of vault
             'format': '%Y-%m-%d %H-%M',
             'Settings Folder': 'Settings',
@@ -94,13 +101,22 @@ def get_gmbot_settings():
             'Bot Channel': os.getenv('BOT_CHANNEL_NAME'),
             'Allowed Guild ids': os.getenv('ALLOWED_GUILD_IDS'),
             'Bot Discord Token': os.getenv('DISCORD_TOKEN'),
-            'Obsidian Vault Path': os.getenv('OBSIDIAN_VAULT_PATH')
+            'Obsidian Vault Path': os.getenv('OBSIDIAN_VAULT_PATH'),
+            'Ollama URL': os.getenv('OLLAMA_URL')
         }
 
     try:
         # Load the settings file
         with open('gmbot.json', 'r') as configfile:
-            current_settings = json.load(configfile)
+            temp_current_settings = json.load(configfile)
+            if temp_current_settings['Settings Version'] != current_settings['Settings Version']:
+                debug_message('Updating Settings version')
+                for setting in temp_current_settings.keys():
+                    current_settings[setting] = temp_current_settings[setting]
+                current_settings['Settings Version'] = CURRENT_VERSION
+                write_gmbot_settings()
+            else:
+                current_settings = temp_current_settings                
         #Load settings into Globals.
         debug_message('Found config file and loaded it.', current_settings['debug'])
     except FileNotFoundError:
