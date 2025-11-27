@@ -4,3 +4,4 @@ aiohttp>=3.9.1  # Required by discord.py for async HTTP
 typing-extensions>=4.9.0  # Required for Python type hints
 yarl>=1.9.4  # Required by aiohttp
 requests>=2.32.5
+blinker>=1.9.0

@@ -1,13 +1,15 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = 0.1
+CURRENT_VERSION = '0.2.1'
 
 import os
 import json
 import discord
 import requests
+from ollama import Client
 from discord.ext import commands
+from discord.ext import tasks
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -28,7 +30,7 @@ bot = discord.Bot(intents=intents)
 gmbot_commands = bot.create_group('gmbot', 'GMBot Commands')
 
 @gmbot_commands.command(description="Starts a new scene, changing the logging file.")
-async def scene(ctx, new_scene: discord.Option(str)): #Creates slash command /scene
+async def scene(ctx, new_scene: discord.Option(str, 'The name for the new scene.')): #Creates slash command /scene
     current_settings['Current Scene'] = new_scene
     current_settings['Current Scene Start'] = datetime.now().strftime(current_settings['format'])
     write_gmbot_settings()
@@ -45,13 +47,94 @@ async def debug(ctx): #Creates slash command /gmbdebug
     write_gmbot_settings()
     await ctx.respond(message)
 
-# Constants
-# DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-# ALLOWED_GUILD_IDS = os.getenv('ALLOWED_GUILD_IDS')
-# OBSIDIAN_VAULT_PATH = os.getenv('OBSIDIAN_VAULT_PATH')
-# BOT_CHANNEL_NAME = os.getenv('BOT_CHANNEL_NAME')
-# CURRENT_SCENE = os.getenv('CURRENT_SCENE')
-# DEBUG_ON = False
+@gmbot_commands.command(description="Builds a request from the AI GM using the current prompt and the contents of the current scene.")
+async def ask_the_gm(ctx, additional: discord.Option(str, 'Any additional instructions or information', required = False, default = '')):
+    debug_message('Building the full prompt')
+    prompt = f"{build_prompt()}\n\nAdditional Information and instructions are:\n{additional}"
+    debug_message(f"Built this prompt:\n{prompt}")
+    to_ask_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt-request.tmp"
+    try:
+        with open(to_ask_file, 'w', encoding='utf-8') as request:
+            request.write(prompt)
+        status = 'Asking the GM.'
+    except Exception as e:
+        status = f"Error writing the request to the AI: {e}"
+        debug_message(status)
+    await ctx.respond(status)
+
+@tasks.loop(seconds=10) # Every 300 seconds look for a file
+async def ai_gm_watcher():
+    """Watches for a request file"""
+    ai_ask_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt-request.tmp"
+    debug_message(f"Looking for ai request file: {ai_ask_file}")
+    if ai_ask_file.is_file():
+        debug_message(f"Found it!")
+        try:
+            with open(ai_ask_file, 'r', encoding='utf-8') as ask:
+                prompt = ask.read()
+        except Exception as e:
+            debug_message(f"Error opening ai ask file {ai_ask_file}: {e}", current_settings['debug'])
+            return
+        if prompt:
+            try:
+                os.remove(ai_ask_file)
+            except Exception as e:
+                debug_message(f"Error removing file {ai_ask_file}: {e}")
+                return
+            ai_response = get_ollama_response(prompt)
+            debug_message(f"Got AI response {ai_response}", current_settings['debug'])
+            channel = bot.get_channel(int(current_settings['Bot Channel']))
+            await channel.send(ai_response)
+            #await gmbot_client.send_message(channel, ai_response)
+    
+# Feeds a prompt to Ollama and gets the response.
+def get_ollama_response(prompt):
+    ollama_connection = Client(host=current_settings['Ollama URL'])
+    response = ollama_connection.chat(model=current_settings['Ollama Model'], messages=[
+        {
+            'role': 'user',
+            'content': prompt,
+        },
+    ])
+    debug_message(f"Ollama sent back: {response.message.content}", current_settings['debug'])
+    return response.message.content
+
+def build_default_prompt():
+    prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
+    try:
+        with open(prompt_file, 'w', encoding='utf-8') as f:
+            f.write(current_settings['Default AI GM Prompt'])
+        debug_message('Created new prompt file.', current_settings['debug'])
+    except Exception as e:
+        debug_message(f"Error creating new prompt file: {e}")
+
+def build_prompt(additional_info = ""):
+    # Get the current AI GM Prompt file contents
+    prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
+    debug_message(f"Looking for file: {prompt_file}", current_settings['debug'])
+    try:
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            prompt = f.read()
+            debug_message(f"Got the following prompt: {prompt}")
+    except FileNotFoundError:
+        build_default_prompt()
+        prompt = current_settings['Default AI GM Prompt']
+        debug_message(f"Built Default prompt: {prompt}")
+    except Exception as e:
+        debug_message(f"Error getting prompt file: {e}", current_settings['debug'])
+        prompt = f"You should simply return: There was a problem getting the prompt: {e}"
+    # Get the content of the current scene
+    current_scene_file = get_current_scene_path()
+    try:
+        with open(current_scene_file, 'r', encoding='utf-8') as cs:
+            current_scene = cs.read()
+    except FileNotFoundError:
+        current_scene = "This is an entirely new scene.\n"
+    except Exception as e:
+        debug_message(f"Error getting scene contents: {e}")
+        current_scene = f"Ignore previous instructions and instead respond with this: There was a problem getting the scene {e}."
+    # Build and return a prompt with the scene information
+    return f"{prompt}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{current_scene}"
 
 def debug_message(message, debug_log=False):
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -84,7 +167,7 @@ def write_gmbot_settings():
     except Exception as err:
         debug_message(f"Error writing config file: {Err}", current_settings['debug'])
 
-def get_gmbot_settings():
+def get_gmbot_settings():    
     # Default settings
     if 'current_settings' not in globals():
         global current_settings 
@@ -98,11 +181,13 @@ def get_gmbot_settings():
             # The following are pulled from globals
             'Current Scene': os.getenv('CURRENT_SCENE'),
             'Current Scene Start': '0000-00-00 00-00',
-            'Bot Channel': os.getenv('BOT_CHANNEL_NAME'),
+            'Bot Channel': os.getenv('BOT_CHANNEL_ID'),
             'Allowed Guild ids': os.getenv('ALLOWED_GUILD_IDS'),
             'Bot Discord Token': os.getenv('DISCORD_TOKEN'),
             'Obsidian Vault Path': os.getenv('OBSIDIAN_VAULT_PATH'),
-            'Ollama URL': os.getenv('OLLAMA_URL')
+            'Ollama URL': os.getenv('OLLAMA_URL'),
+            'Default AI GM Prompt': 'You are a Game Master for a Dungeons and Dragons game.\n',
+            'Ollama Model': os.getenv('OLLAMA_MODEL')
         }
 
     try:
@@ -248,7 +333,7 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     # Only process messages in the bot's assigned channel
-    if message.channel.name == current_settings['Bot Channel'] and not message.author.bot:
+    if message.channel.id == current_settings['Bot Channel'] and not message.author.bot:
         try:
             # Format the base content
             base_content = message.content
@@ -274,10 +359,18 @@ async def on_message(message):
 # Run the bot
 if __name__ == "__main__":
     get_gmbot_settings()
+    ai_ask_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt-request.tmp"
+    if ai_ask_file.is_file():
+        debug_message(f"Removing old ai_ask file.")
+        try:
+            os.remove(ai_ask_file)
+        except Exception as e:
+            debug_message(f"Error removing file {ai_ask_file}: {e}")    
     if not current_settings['Bot Discord Token']:
         raise ValueError("Discord token not found in .env file")
     if not current_settings['Obsidian Vault Path']:
         raise ValueError("Obsidian vault path not found in .env file")
 
     debug_message("Bot is starting...", current_settings['debug'])
+    ai_gm_watcher.start()
     bot.run(current_settings['Bot Discord Token'])
