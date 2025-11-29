@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3'
+CURRENT_VERSION = '0.3.1'
 
 import os
 import json
@@ -66,6 +66,17 @@ async def ask_the_gm(ctx, additional: discord.Option(str, 'Any additional instru
         debug_message(status)
     await ctx.respond(status)
 
+@gmbot_commands.command(description="Sets the active logging channel. Must be server administrator.")
+@discord.default_permissions(
+    administrator=True,
+)  # Only admins can changing the logging channel
+async def set_game_channel(ctx):
+    channel = ctx.channel
+    debug_message(f"Setting active game channel to {channel.name} ({channel.id})")
+    current_settings['Bot Channel'] = channel.id
+    write_gmbot_settings()
+    await ctx.respond(f"Set the active game channel to {channel.name}")
+
 @tasks.loop(seconds=10) # Every 300 seconds look for a file
 async def ai_gm_watcher():
     """Watches for a request file"""
@@ -104,6 +115,8 @@ def get_ollama_response(prompt):
     ])
     debug_message(f"Ollama sent back: {response.message.content}", current_settings['debug'])
     return response.message.content
+
+
 
 def build_default_prompt():
     prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
@@ -188,7 +201,7 @@ def get_gmbot_settings():
             'Current Scene': os.getenv('CURRENT_SCENE'),
             'Current Scene Start': '0000-00-00 00-00',
             'Current Scene Private': False,
-            'Bot Channel': os.getenv('BOT_CHANNEL_ID'),
+            'Bot Channel': int(os.getenv('BOT_CHANNEL_ID')),
             'Allowed Guild ids': os.getenv('ALLOWED_GUILD_IDS'),
             'Bot Discord Token': os.getenv('DISCORD_TOKEN'),
             'Obsidian Vault Path': os.getenv('OBSIDIAN_VAULT_PATH'),
@@ -217,8 +230,17 @@ def get_gmbot_settings():
         debug_message('No config file found, creating from defaults.', current_settings['debug'])
     except Exception as err:
         debug_message(f"Error reading GMBot config file: {err}", current_settings['debug'])
-    
+    set_env_settings()
     return
+
+def set_env_settings():
+    """Overrides saved settings using ones set by env. Only for specific settings"""
+    current_settings['Ollama Model'] = os.getenv('OLLAMA_MODEL')
+    current_settings['Ollama URL'] = os.getenv('OLLAMA_URL')
+    current_settings['Obsidian Vault Path'] = os.getenv('OBSIDIAN_VAULT_PATH')
+    current_settings['Allowed Guild ids'] = os.getenv('ALLOWED_GUILD_ID')
+    current_settings['Bot Discord Token'] = os.getenv('DISCORD_TOKEN')
+    
 
 def get_current_scene_path():
     filename = f"{current_settings['Current Scene Start']} - {current_settings['Current Scene']}.md"
