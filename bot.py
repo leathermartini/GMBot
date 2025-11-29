@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.2.1'
+CURRENT_VERSION = '0.3'
 
 import os
 import json
@@ -30,11 +30,13 @@ bot = discord.Bot(intents=intents)
 gmbot_commands = bot.create_group('gmbot', 'GMBot Commands')
 
 @gmbot_commands.command(description="Starts a new scene, changing the logging file.")
-async def scene(ctx, new_scene: discord.Option(str, 'The name for the new scene.')): #Creates slash command /scene
+async def scene(ctx, new_scene: discord.Option(str, 'The name for the new scene.'), is_private: discord.Option(bool, 'Is this scene private', default=False)): #Creates slash command /scene
     current_settings['Current Scene'] = new_scene
     current_settings['Current Scene Start'] = datetime.now().strftime(current_settings['format'])
+    current_settings['Current Scene Private'] = is_private
     write_gmbot_settings()
-    await ctx.respond(f"--------------------- {new_scene} ---------------------")
+    if is_private: prefix = "Private: "
+    await ctx.respond(f"--------------------- {prefix}{new_scene} ---------------------")
 
 @gmbot_commands.command(description="Toggles debugging to the Obsidian vault, in the Settings folder.")
 async def debug(ctx): #Creates slash command /gmbdebug
@@ -57,6 +59,8 @@ async def ask_the_gm(ctx, additional: discord.Option(str, 'Any additional instru
         with open(to_ask_file, 'w', encoding='utf-8') as request:
             request.write(prompt)
         status = 'Asking the GM.'
+        if current_settings['Current Scene Private']:
+            status = f"{status} But the current scene is private, so the GM will not have the scene log. Responses may be more unexpected."
     except Exception as e:
         status = f"Error writing the request to the AI: {e}"
         debug_message(status)
@@ -84,7 +88,9 @@ async def ai_gm_watcher():
             ai_response = get_ollama_response(prompt)
             debug_message(f"Got AI response {ai_response}", current_settings['debug'])
             channel = bot.get_channel(int(current_settings['Bot Channel']))
-            await channel.send(ai_response)
+            sent_message = await channel.send(ai_response)
+            await sent_message.add_reaction('✅')
+            await sent_message.add_reaction('❌')
             #await gmbot_client.send_message(channel, ai_response)
     
 # Feeds a prompt to Ollama and gets the response.
@@ -181,6 +187,7 @@ def get_gmbot_settings():
             # The following are pulled from globals
             'Current Scene': os.getenv('CURRENT_SCENE'),
             'Current Scene Start': '0000-00-00 00-00',
+            'Current Scene Private': False,
             'Bot Channel': os.getenv('BOT_CHANNEL_ID'),
             'Allowed Guild ids': os.getenv('ALLOWED_GUILD_IDS'),
             'Bot Discord Token': os.getenv('DISCORD_TOKEN'),
@@ -333,7 +340,7 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     # Only process messages in the bot's assigned channel
-    if message.channel.id == current_settings['Bot Channel'] and not message.author.bot:
+    if message.channel.id == int(current_settings['Bot Channel']) and not message.author.bot and not current_settings['Current Scene Private']:
         try:
             # Format the base content
             base_content = message.content
@@ -349,12 +356,47 @@ async def on_message(message):
             append_to_scene(current_scene_path, message.author.display_name, base_content)    
             # Add complete emoji reaction and reset status
             if current_settings['debug']:
-                await message.add_reaction('✅')
+                await message.add_reaction('✨')
             await update_bot_status()
         except Exception as e:
             debug_message(f"Error processing message: {e}", current_settings['debug'])
-            await message.add_reaction('❌')
+            await message.add_reaction('❗')
             await update_bot_status()  # Reset status in case of error
+    elif current_settings['Current Scene Private']:
+        debug_message('Current scene is private, not logging.', current_settings['debug'])
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    # If a GM message is accepted, log it, if it is not, then delete it.
+    # Ignore bot's own reactions
+    if payload.user_id == bot.user.id:
+        return            
+    # Get the channel and message
+    channel = await bot.fetch_channel(payload.channel_id)
+    # If not in the logged channel, ignore
+    if channel.id != int(current_settings['Bot Channel']):
+        return    
+    message = await channel.fetch_message(payload.message_id)
+    try:
+        if not payload.emoji.is_custom_emoji() and payload.emoji.name == '✅' and message.author.id == bot.user.id and not current_settings['Current Scene Private']:
+            #Log the message.
+            debug_message(f"Logging the accepted GMBot message {message.id} content ({message.content}) to current scene", current_settings['debug'])
+            current_scene_path = get_current_scene_path()
+            ensure_current_scene_exists(current_scene_path)
+            append_to_scene(current_scene_path, message.author.display_name, message.content)
+            await message.remove_reaction('✅', bot.user)
+            await message.remove_reaction('❌', bot.user)
+        elif not payload.emoji.is_custom_emoji() and payload.emoji.name == '✅' and message.author.id == bot.user.id and current_settings['Current Scene Private']:
+            debug_message('Current scene is private, not logging.', current_settings['debug'])
+            await channel.send('Current scene is private, not logging the message.')
+            await message.remove_reaction('✅', bot.user)
+            await message.remove_reaction('❌', bot.user)
+        elif not payload.emoji.is_custom_emoji() and payload.emoji.name == '❌' and message.author.id == bot.user.id:
+            #delete the message.
+            debug_message(f"Removing rejected GMBot mesage {message.id} content ({message.content}).")
+            await channel.delete_messages([message])
+    except Exception as e:
+        debug_message(f"Error on responding to reaction {payload.emoji}: {e}")
 
 # Run the bot
 if __name__ == "__main__":
