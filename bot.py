@@ -1,12 +1,13 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.1'
+CURRENT_VERSION = '0.3.2'
 
 import os
 import json
 import discord
 import requests
+import frontmatter
 from ollama import Client
 from discord.ext import commands
 from discord.ext import tasks
@@ -35,7 +36,10 @@ async def scene(ctx, new_scene: discord.Option(str, 'The name for the new scene.
     current_settings['Current Scene Start'] = datetime.now().strftime(current_settings['format'])
     current_settings['Current Scene Private'] = is_private
     write_gmbot_settings()
-    if is_private: prefix = "Private: "
+    if is_private: 
+        prefix = "Private: "
+    else:
+        prefix = ""
     await ctx.respond(f"--------------------- {prefix}{new_scene} ---------------------")
 
 @gmbot_commands.command(description="Toggles debugging to the Obsidian vault, in the Settings folder.")
@@ -77,6 +81,46 @@ async def set_game_channel(ctx):
     write_gmbot_settings()
     await ctx.respond(f"Set the active game channel to {channel.name}")
 
+@gmbot_commands.command(description="Remebers a character by creating an entry in the Obsidian Vault.")
+async def add_character(ctx, name: discord.Option(str, 'Name of the character to remember', required = True), player: discord.Option(bool, 'Is this a player character?', required = False, default = False), description: discord.Option(str, 'Description of this character', required=False, default='')):
+    #Check if the character exists
+    char_file = get_character_file(name)
+    ensure_character_path_exists()
+    #if not, save it
+    if not char_file.is_file():
+        char_file_text = get_default_char_template()
+        debug_message(f"Got character template: {char_file_text}", current_settings['debug'])
+        if player:
+            char_file_text['🔹NPC'] = False
+        else:
+            char_file_text['🔹NPC'] = True
+        if description:
+            char_file_text['👁️‍🗨️Description'] = description
+        try:
+            with open(char_file, 'w', encoding='utf-8') as cf:
+                cf.write(frontmatter.dumps(char_file_text))
+                debug_message(f'Wrote character file for {name}', current_settings['debug'])
+            await ctx.respond(f"Created Obsidian File for {name}.")
+        except Exception as e:
+            debug_message(f'Error writing character file {str(char_file)}: {e}', current_settings['debug'])
+            await ctx.respond(f"Error creating character file, check logs.")
+    else:
+        await ctx.respond(f"File for {name} already exists, please edit through Obsidian.")
+
+@gmbot_commands.command(descritpion="Gets a list of the current characters.")
+async def get_characters(ctx, which_ones: discord.Option(str, "Which ones to return", choices=['All', 'PCs', 'NPCs'], default="All")):
+    character_list = get_character_list()
+    if character_list and which_ones == 'PCs':
+        character_list = get_pc_list(character_list, True)
+    elif character_list and which_ones == 'NPCs':
+        character_list = get_pc_list(character_list, False)
+    if character_list:
+        results = "Found the characters:\n"
+        results = results + "\n".join(character_list)
+    else:
+        results = "No characters found."
+    await ctx.respond(results)
+
 @tasks.loop(seconds=10) # Every 300 seconds look for a file
 async def ai_gm_watcher():
     """Watches for a request file"""
@@ -116,8 +160,50 @@ def get_ollama_response(prompt):
     debug_message(f"Ollama sent back: {response.message.content}", current_settings['debug'])
     return response.message.content
 
+def get_character_file(name):
+    return get_character_path() / f"{name}.md"
 
+def get_character_path():
+    return Path(current_settings['Obsidian Vault Path']) / current_settings['Characters']
 
+def get_character_list():
+    ensure_character_path_exists()
+    character_path = get_character_path()
+    try:
+        raw_characters = os.listdir(character_path)
+        raw_characters.remove(current_settings['Character template'])  # Remove the template file from the list    
+        characters = [i[:-3] for i in raw_characters] # Remove file extension from the character names
+    except Exception as e:
+        debug_message(f"Error getting character list: {e}")
+        characters = []
+    return characters       
+
+def get_pc_list(character_file_list, is_pc=True):
+    # Returns a list of PCs from a list of character files. If the second arguement is false, returns the NPCs.
+    try:
+        results = []
+        ensure_character_path_exists()
+        for x in character_file_list:
+            with open(get_character_file(x), "r", encoding="utf-8") as cf:
+                temp_char = frontmatter.load(cf)
+            if is_pc and not temp_char['🔹NPC']:
+                results.append(x)
+            elif not is_pc and temp_char['🔹NPC']:
+                results.append(x)
+    except Exception as e:
+        debug_message(f"Error getting PC status: {e}")
+    return results
+
+def get_default_char_template():
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Characters'] / current_settings['Character template']
+    try:
+        with open(template_file, "r", encoding='utf-8') as tf:
+            template = frontmatter.load(tf)
+    except Exception as e:
+        debug_message(f"Error reading character template file: {e}")
+        template = "error"
+    return template
+    
 def build_default_prompt():
     prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
     try:
@@ -193,9 +279,15 @@ def get_gmbot_settings():
         current_settings = {
             'Settings Version': CURRENT_VERSION,
             'folder': 'Scenes',  # Root of vault
+            'Characters': 'Characters', # Folder for Characters
+            'Items': 'Items', #Folder for Items
+            'Locations': 'Locations', # Folder for Locations
             'format': '%Y-%m-%d %H-%M',
             'Settings Folder': 'Settings',
-            'template': 'Settings/Default Scene Template.md',
+            'template': 'Settings/_Default Scene Template.md',
+            'Character template': '_Character Template.md',
+            'Location template': '_Location Template.md',
+            'Item template': '_Item Template.md',
             'debug': False,
             # The following are pulled from globals
             'Current Scene': os.getenv('CURRENT_SCENE'),
@@ -263,6 +355,11 @@ def parse_template_string(template_string):
     # Replaces {scene} with the value of current_settings['Current Scene']
     # Add end of line
     return template_string.format(date=get_formatted_date(), scene=current_settings['Current Scene']) + '\n'
+
+def ensure_character_path_exists():
+    character_path = get_character_path()
+    if not character_path.exists():
+        os.makedirs(character_path, exist_ok=True)
 
 def ensure_current_scene_exists(file_path):
     """Create the current scene if it doesn't exist, using template if available and enabled."""
