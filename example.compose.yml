@@ -1,6 +1,6 @@
 services:
   bot:
-    image: ghcr.io/sloraris/obsidian-discord-bot
+    image: ghcr.io/leathermartini/GMBot
     container_name: obsidian-discord-bot
     volumes:
       - ${OBSIDIAN_VAULT_PATH}:/vault

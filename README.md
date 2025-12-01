@@ -4,38 +4,40 @@ A Discord bot logs Discord messages into an Obsidian file to be used as referenc
 
 ## Features
 - Log all Discord messages in a particular channel to an Obsidian File, broken up by scene.
-- Command to change scene - pending
+- /gmbot scene -> Creates a new scene, logging to a new file. Can mark a scene "private" and logging is disabled.
+- /gmbot set_game_channel -> admin command to set the active game channel
+- /gmbot ask_the_GM -> sends a prompt to an Ollama LLM with the default prompt, current scene log, and additional information
+- /gmbot add_character/add_location/add_item -> Add important characters, locations, and items to the vault - further edits should be done in obsidian
+- /gmbot get_characters/get_locations/get_items -> gets a list of known characters/locations/items
+
 
 ## Setup - TO UPDATE
 
 1. Create a `.env` file with the following variables:
    ```env-example
-    # Discord Bot Token (from Discord Developer Portal)
-    DISCORD_TOKEN=your_discord_bot_token
-
-    # Discord Server ID (from Discord server settings)
-    # This is the ID of the server where the bot will operate
-    # This is a security measure to prevent the bot from operating in other servers
-    ALLOWED_GUILD_IDS=your_discord_server_id
-
-    # Path to your Obsidian vault
-    # For local Python deployment: Use absolute path to your vault
-    # Example: /Users/username/Documents/ObsidianVault
-    # For Docker deployment: leave this as /vault and map your local vault path to /vault in the container
-    # Example: /Users/username/Documents/ObsidianVault:/vault
-    OBSIDIAN_VAULT_PATH=path_to_your_obsidian_vault
-
-    # Name of the Discord channel where the bot will operate
-    # This should match exactly (case-sensitive)
-    BOT_CHANNEL_NAME=your_channel_name
-
-    # Optional: Section in daily notes where content should be appended
-    # If specified, new content will be added under this section header
-    # Example: "Daily Log" will append content under "# Daily Log" or "## Daily Log"
-    CUREENT_SCENE=Scene_1
+   # Discord Bot Token (from Discord Developer Portal)
+   DISCORD_TOKEN=<your API token>
+   
+   # Discord Server ID (from Discord server settings)
+   # This is the ID of the server where the bot will operate
+   # This is a security measure to prevent the bot from operating in other servers
+   ALLOWED_GUILD_IDS=<your server ID>
+   
+   # Path to your Obsidian vault
+   # For local Python deployment: Use absolute path to your vault
+   # Example: /Users/username/Documents/ObsidianVault
+   # For Docker deployment: leave this as /vault and map your local vault path to /vault in the container
+   # Example: /Users/username/Documents/ObsidianVault:/vault
+   OBSIDIAN_VAULT_PATH=<path to the obsidian vaul>
+   
+   # Channel ID of the Discord channel where the bot will operate
+   BOT_CHANNEL_ID=<your channel id>
+   
+   # URL to Ollama instance
+   OLLAMA_URL=<USL to ollama instance>
+   # Default Ollama Model. Must be installed on Ollama server.
+   OLLAMA_MODEL=<model to use, eg 'llama3.2:1b'>
    ```
-
-2. Create a channel with the name you specified in `BOT_CHANNEL_NAME`
 
 ## Deployment
 
@@ -55,7 +57,7 @@ A Discord bot logs Discord messages into an Obsidian file to be used as referenc
 #### Using Pre-built Image
 1. Pull the image:
    ```bash
-   docker pull ghcr.io/sloraris/obsidian-discord:latest
+   docker pull ghcr.io/leathermartini/GMBot:main
    ```
 
 2. Create a `.env` file with your configuration

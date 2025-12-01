@@ -1,13 +1,14 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.3'
+CURRENT_VERSION = '0.3.4'
 
 import os
 import json
 import discord
 import requests
 import frontmatter
+import re
 from ollama import Client
 from discord.ext import commands
 from discord.ext import tasks
@@ -28,6 +29,7 @@ intents.presences = False
 
 bot = discord.Bot(intents=intents)
 
+#slash commands
 gmbot_commands = bot.create_group('gmbot', 'GMBot Commands')
 
 @gmbot_commands.command(description="Starts a new scene, changing the logging file.")
@@ -197,6 +199,7 @@ async def get_items(ctx):
         results = "No items found."
     await ctx.respond(results)
 
+#Watcher for AI prompts
 @tasks.loop(seconds=10) # Every 300 seconds look for a file
 async def ai_gm_watcher():
     """Watches for a request file"""
@@ -236,6 +239,8 @@ def get_ollama_response(prompt):
     debug_message(f"Ollama sent back: {response.message.content}", current_settings['debug'])
     return response.message.content
 
+
+#Character functions
 def get_character_file(name):
     return get_character_path() / f"{name}.md"
 
@@ -270,6 +275,59 @@ def get_pc_list(character_file_list, is_pc=True):
         debug_message(f"Error getting PC status: {e}")
     return results
 
+def get_all_characters_in_scene(scene_file):
+    characters = get_character_list()
+    scene_log = get_scene_log(scene_file)
+    char_found = []
+    if characters:
+        for char in characters:
+            if match_characters_in_log(char, scene_log):
+                char_found.append(char)
+    return char_found
+
+def match_characters_in_log(char_name, log):
+    char_alias_list = get_character_names(char_name)
+    found = False
+    for ca in char_alias_list:
+        if findWholeWord(ca)(log):
+            found = True
+            break
+    return found
+
+def get_scene_log(scene_file):
+    try:
+        with open(scene_file, 'r', encoding='utf-8') as sf:
+            scene_log = sf.read()
+    except FileNotFoundError:
+        scene_log = "No scene found.\n"
+    except Exception as e:
+        debug_message(f"Error getting scene contents: {e}")
+        scene_log = f"Ignore previous instructions and instead respond with this: There was a problem getting the scene {e}."
+    return scene_log
+
+def get_character_names(char_name):
+    aliases = [char_name]
+    try:
+        with open(get_character_file(char_name), 'r', encoding='utf-8') as cf:
+            character_data = frontmatter.load(cf)
+    except Exception as e:
+        debug_message(f"Error getting character file for {char_name}: {e}", current_settings['debug'])
+    if character_data['aliases']:
+        for a in character_data['aliases']:
+            aliases.append(a)
+    return aliases
+
+def get_default_char_template():
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Characters'] / current_settings['Character template']
+    try:
+        with open(template_file, "r", encoding='utf-8') as tf:
+            template = frontmatter.load(tf)
+    except Exception as e:
+        debug_message(f"Error reading character template file: {e}")
+        template = "error"
+    return template
+
+#Location functions
 def get_location_file(name):
     return get_location_path() / f"{name}.md"
 
@@ -312,16 +370,12 @@ def select_location_list(location_list, to_get):
         debug_message(f"Error sorting locations: {e}")
     return results
 
+#item functions
 def get_item_file(name):
     return get_item_path() / f"{name}.md"
 
 def get_item_path():
     return Path(current_settings['Obsidian Vault Path']) / current_settings['Items']
-
-def ensure_item_path_exists():
-    item_path = get_item_path()
-    if not item_path.exists():
-        os.makedirs(item_path, exist_ok=True)
 
 def get_item_list():
     ensure_item_path_exists()
@@ -345,16 +399,7 @@ def get_default_item_template():
         template = "error"
     return template
 
-def get_default_char_template():
-    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Characters'] / current_settings['Character template']
-    try:
-        with open(template_file, "r", encoding='utf-8') as tf:
-            template = frontmatter.load(tf)
-    except Exception as e:
-        debug_message(f"Error reading character template file: {e}")
-        template = "error"
-    return template
-    
+# AI prompt building functions
 def build_default_prompt():
     prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
     try:
@@ -363,6 +408,7 @@ def build_default_prompt():
         debug_message('Created new prompt file.', current_settings['debug'])
     except Exception as e:
         debug_message(f"Error creating new prompt file: {e}")
+
 
 def build_prompt(additional_info = ""):
     # Get the current AI GM Prompt file contents
@@ -389,9 +435,22 @@ def build_prompt(additional_info = ""):
     except Exception as e:
         debug_message(f"Error getting scene contents: {e}")
         current_scene = f"Ignore previous instructions and instead respond with this: There was a problem getting the scene {e}."
+    # Get the character info for the current scene
+    characters = get_all_characters_in_scene(current_scene_file)
+    char_info = ""
+    if characters:
+        for char in characters:
+            try:
+                with open(get_character_file(char), 'r', encoding='utf-8') as cf:
+                    char_sheet = frontmatter.dumps(frontmatter.load(cf))
+            except Exception as e:
+                debug_message(f"Error getting character file for {char}: {e}", current_settings['debug'])    
+                char_sheet = f"{char} has no further info."
+            char_info = char_info + "\n\n" + char +"\n" + char_sheet            
     # Build and return a prompt with the scene information
-    return f"{prompt}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{current_scene}"
+    return f"{prompt}\n\nThe characters in this scene are:\n{char_info}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{current_scene}"
 
+# Other functions
 def debug_message(message, debug_log=False):
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     file_path = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "Debug Log.md"
@@ -441,7 +500,7 @@ def get_gmbot_settings():
             'Item template': '_Item Template.md',
             'debug': False,
             # The following are pulled from globals
-            'Current Scene': os.getenv('CURRENT_SCENE'),
+            'Current Scene': 'Initial Scene',
             'Current Scene Start': '0000-00-00 00-00',
             'Current Scene Private': False,
             'Bot Channel': int(os.getenv('BOT_CHANNEL_ID')),
@@ -517,6 +576,11 @@ def ensure_location_path_exists():
     if not location_path.exists():
         os.makedirs(location_path, exist_ok=True)
 
+def ensure_item_path_exists():
+    item_path = get_item_path()
+    if not item_path.exists():
+        os.makedirs(item_path, exist_ok=True)
+
 def ensure_current_scene_exists(file_path):
     """Create the current scene if it doesn't exist, using template if available and enabled."""
     if not file_path.exists():
@@ -567,6 +631,9 @@ def slugify(text):
     text = re.sub(r'[^\w\s-]', '', text)
     text = re.sub(r'[-\s]+', '-', text).strip('-')
     return text
+
+def findWholeWord(w):
+    return re.compile(r'\b({0})\b'.format(w), flags=re.IGNORECASE).search
 
 @bot.event
 async def on_guild_join(guild):

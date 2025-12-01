@@ -46,6 +46,6 @@ docker-compose.override.yml
 *.local
 .local/
 
-# Settings file
+# Settings and local test files
 gmbot.json
-Function building space.py
+test.py
