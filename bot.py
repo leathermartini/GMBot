@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.2'
+CURRENT_VERSION = '0.3.3'
 
 import os
 import json
@@ -121,6 +121,82 @@ async def get_characters(ctx, which_ones: discord.Option(str, "Which ones to ret
         results = "No characters found."
     await ctx.respond(results)
 
+@gmbot_commands.command(description="Remebers a location by creating an entry in the Obsidian Vault.")
+async def add_location(ctx, name: discord.Option(str, 'Name of the location to remember', required = True), location_type: discord.Option(str, 'What kind of location?', required = True, choices=['Region', 'City', 'Point'], default = 'Point'), description: discord.Option(str, 'Description of this location', required=False, default='')):
+    #Check if the location exists
+    loc_file = get_location_file(name)
+    ensure_location_path_exists()
+    #if not, save it
+    if not loc_file.is_file():
+        loc_file_text = get_default_loc_template()
+        debug_message(f"Got location template: {loc_file_text}", current_settings['debug'])
+        if location_type:
+            loc_file_text['📌location_type'] = location_type
+        if description:
+            loc_file_text['👁️‍🗨️Description'] = description
+        try:
+            with open(loc_file, 'w', encoding='utf-8') as cf:
+                cf.write(frontmatter.dumps(loc_file_text))
+                debug_message(f'Wrote location file for {name}', current_settings['debug'])
+            await ctx.respond(f"Created Obsidian File for {name}.")
+        except Exception as e:
+            debug_message(f'Error writing location file {str(loc_file)}: {e}', current_settings['debug'])
+            await ctx.respond(f"Error creating location file, check logs.")
+    else:
+        await ctx.respond(f"File for {name} already exists, please edit through Obsidian.")
+
+@gmbot_commands.command(descritpion="Gets a list of the current locations.")
+async def get_locations(ctx, which_ones: discord.Option(str, "Which ones to return", choices=['Regions', 'Cities', 'Points', 'All'], default="All")):
+    location_list = get_location_list()
+    match which_ones:
+        case 'Regions':
+            to_get = 'Region'
+        case 'Cities':
+            to_get = 'City'
+        case 'Points':
+            to_get = 'Point'
+        case _:
+            to_get = 'All'
+    if to_get != 'All': location_list = select_location_list(location_list, to_get)
+    if location_list:
+        results = "Found the locations:\n"
+        results = results + "\n".join(location_list)
+    else:
+        results = "No locations found."
+    await ctx.respond(results)    
+
+@gmbot_commands.command(description="Remebers a item by creating an entry in the Obsidian Vault.")
+async def add_item(ctx, name: discord.Option(str, 'Name of the item to remember', required = True), description: discord.Option(str, 'Description of this item', required=False, default='')):
+    #Check if the item exists
+    item_file = get_item_file(name)
+    ensure_item_path_exists()
+    #if not, save it
+    if not item_file.is_file():
+        item_file_text = get_default_item_template()
+        debug_message(f"Got item template: {item_file_text}", current_settings['debug'])
+        if description:
+            item_file_text['👁️‍🗨️Description'] = description
+        try:
+            with open(item_file, 'w', encoding='utf-8') as cf:
+                cf.write(frontmatter.dumps(item_file_text))
+                debug_message(f'Wrote item file for {name}', current_settings['debug'])
+            await ctx.respond(f"Created Obsidian File for {name}.")
+        except Exception as e:
+            debug_message(f'Error writing item file {str(item_file)}: {e}', current_settings['debug'])
+            await ctx.respond(f"Error creating item file, check logs.")
+    else:
+        await ctx.respond(f"File for {name} already exists, please edit through Obsidian.")
+
+@gmbot_commands.command(descritpion="Gets a list of the current items.")
+async def get_items(ctx):
+    item_list = get_item_list()
+    if item_list:
+        results = "Found the items:\n"
+        results = results + "\n".join(item_list)
+    else:
+        results = "No items found."
+    await ctx.respond(results)
+
 @tasks.loop(seconds=10) # Every 300 seconds look for a file
 async def ai_gm_watcher():
     """Watches for a request file"""
@@ -193,6 +269,81 @@ def get_pc_list(character_file_list, is_pc=True):
     except Exception as e:
         debug_message(f"Error getting PC status: {e}")
     return results
+
+def get_location_file(name):
+    return get_location_path() / f"{name}.md"
+
+def get_location_path():
+    return Path(current_settings['Obsidian Vault Path']) / current_settings['Locations']
+
+def get_location_list():
+    ensure_location_path_exists()
+    location_path = get_location_path()
+    try:
+        raw_locations = os.listdir(location_path)
+        raw_locations.remove(current_settings['Location template'])  # Remove the template file from the list    
+        locations = [i[:-3] for i in raw_locations] # Remove file extension from the location names
+    except Exception as e:
+        debug_message(f"Error getting location list: {e}")
+        locations = []
+    return locations
+    
+def get_default_loc_template():
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Locations'] / current_settings['Location template']
+    try:
+        with open(template_file, "r", encoding='utf-8') as tf:
+            template = frontmatter.load(tf)
+    except Exception as e:
+        debug_message(f"Error reading location template file: {e}")
+        template = "error"
+    return template
+
+def select_location_list(location_list, to_get):
+    # Returns just the specified type of locations from a list of locations.
+    try:
+        results = []
+        ensure_location_path_exists()
+        for x in location_list:
+            with open(get_location_file(x), "r", encoding="utf-8") as lf:
+                temp_loc = frontmatter.load(lf)
+            if temp_loc['📌location_type'] == to_get:
+                results.append(x)
+    except Exception as e:
+        debug_message(f"Error sorting locations: {e}")
+    return results
+
+def get_item_file(name):
+    return get_item_path() / f"{name}.md"
+
+def get_item_path():
+    return Path(current_settings['Obsidian Vault Path']) / current_settings['Items']
+
+def ensure_item_path_exists():
+    item_path = get_item_path()
+    if not item_path.exists():
+        os.makedirs(item_path, exist_ok=True)
+
+def get_item_list():
+    ensure_item_path_exists()
+    item_path = get_item_path()
+    try:
+        raw_items = os.listdir(item_path)
+        raw_items.remove(current_settings['Item template'])  # Remove the template file from the list    
+        items = [i[:-3] for i in raw_items] # Remove file extension from the item names
+    except Exception as e:
+        debug_message(f"Error getting item list: {e}")
+        items = []
+    return items
+    
+def get_default_item_template():
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Items'] / current_settings['Item template']
+    try:
+        with open(template_file, "r", encoding='utf-8') as tf:
+            template = frontmatter.load(tf)
+    except Exception as e:
+        debug_message(f"Error reading item template file: {e}")
+        template = "error"
+    return template
 
 def get_default_char_template():
     template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Characters'] / current_settings['Character template']
@@ -360,6 +511,11 @@ def ensure_character_path_exists():
     character_path = get_character_path()
     if not character_path.exists():
         os.makedirs(character_path, exist_ok=True)
+
+def ensure_location_path_exists():
+    location_path = get_location_path()
+    if not location_path.exists():
+        os.makedirs(location_path, exist_ok=True)
 
 def ensure_current_scene_exists(file_path):
     """Create the current scene if it doesn't exist, using template if available and enabled."""
