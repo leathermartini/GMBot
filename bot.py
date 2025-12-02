@@ -370,6 +370,37 @@ def select_location_list(location_list, to_get):
         debug_message(f"Error sorting locations: {e}")
     return results
 
+def get_all_locations_in_scene(scene_file):
+    locations = get_location_list()
+    scene_log = get_scene_log(scene_file)
+    loc_found = []
+    if locations:
+        for loc in locations:
+            if match_locations_in_log(loc, scene_log):
+                loc_found.append(loc)
+    return loc_found
+
+def match_locations_in_log(loc_name, log):
+    loc_alias_list = get_location_names(loc_name)
+    found = False
+    for lo in loc_alias_list:
+        if findWholeWord(lo)(log):
+            found = True
+            break
+    return found
+
+def get_location_names(loc_name):
+    aliases = [loc_name]
+    try:
+        with open(get_location_file(loc_name), 'r', encoding='utf-8') as lf:
+            location_data = frontmatter.load(lf)
+    except Exception as e:
+        debug_message(f"Error getting location file for {loc_name}: {e}", current_settings['debug'])
+    if location_data['aliases']:
+        for a in location_data['aliases']:
+            aliases.append(a)
+    return aliases
+
 #item functions
 def get_item_file(name):
     return get_item_path() / f"{name}.md"
@@ -398,6 +429,37 @@ def get_default_item_template():
         debug_message(f"Error reading item template file: {e}")
         template = "error"
     return template
+
+def get_all_items_in_scene(scene_file):
+    items = get_item_list()
+    scene_log = get_scene_log(scene_file)
+    item_found = []
+    if items:
+        for it in items:
+            if match_items_in_log(it, scene_log):
+                item_found.append(it)
+    return item_found
+
+def match_items_in_log(item_name, log):
+    item_alias_list = get_item_names(item_name)
+    found = False
+    for it in item_alias_list:
+        if findWholeWord(it)(log):
+            found = True
+            break
+    return found
+
+def get_item_names(item_name):
+    aliases = [item_name]
+    try:
+        with open(get_item_file(item_name), 'r', encoding='utf-8') as itf:
+            item_data = frontmatter.load(itf)
+    except Exception as e:
+        debug_message(f"Error getting item file for {item_name}: {e}", current_settings['debug'])
+    if item_data['aliases']:
+        for a in item_data['aliases']:
+            aliases.append(a)
+    return aliases
 
 # AI prompt building functions
 def build_default_prompt():
@@ -446,9 +508,33 @@ def build_prompt(additional_info = ""):
             except Exception as e:
                 debug_message(f"Error getting character file for {char}: {e}", current_settings['debug'])    
                 char_sheet = f"{char} has no further info."
-            char_info = char_info + "\n\n" + char +"\n" + char_sheet            
+            char_info = char_info + "\n\n" + char +"\n" + char_sheet  
+    # Get locations
+    locations = get_all_locations_in_scene(current_scene_file)
+    loc_info = ""
+    if locations:
+        for loc in locations:
+            try:
+                with open(get_location_file(char), 'r', encoding='utf-8') as lf:
+                    location_sheet = frontmatter.dumps(frontmatter.load(lf))
+            except Exception as e:
+                debug_message(f"Error getting character file for {loc}: {e}", current_settings['debug'])    
+                location_sheet = f"{loc} has no further info."
+            loc_info = loc_info + "\n\n" + loc +"\n" + location_sheet  
+    # Get items
+    items = get_all_items_in_scene(current_scene_file)
+    item_info = ""
+    if items:
+        for it in items:
+            try:
+                with open(get_location_file(it), 'r', encoding='utf-8') as itf:
+                    item_sheet = frontmatter.dumps(frontmatter.load(itf))
+            except Exception as e:
+                debug_message(f"Error getting character file for {it}: {e}", current_settings['debug'])    
+                item_sheet = f"{it} has no further info."
+            item_info = item_info + "\n\n" + it +"\n" + item_sheet  
     # Build and return a prompt with the scene information
-    return f"{prompt}\n\nThe characters in this scene are:\n{char_info}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{current_scene}"
+    return f"{prompt}\n\nThe characters in this scene are:\n{char_info}\n\nThe locations in this scene are:\n{loc_info}\n\nThe important items in this scene are:\n{item_info}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{current_scene}"
 
 # Other functions
 def debug_message(message, debug_log=False):
