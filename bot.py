@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.4'
+CURRENT_VERSION = '0.3.5b'
 
 import os
 import json
