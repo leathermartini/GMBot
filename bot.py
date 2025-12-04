@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.5b'
+CURRENT_VERSION = '0.3.6'
 
 import os
 import json
@@ -578,6 +578,7 @@ def get_gmbot_settings():
             'Characters': 'Characters', # Folder for Characters
             'Items': 'Items', #Folder for Items
             'Locations': 'Locations', # Folder for Locations
+            'Pinned': 'Pinned Messages', # Folder for Pinned Messages
             'format': '%Y-%m-%d %H-%M',
             'Settings Folder': 'Settings',
             'template': 'Settings/_Default Scene Template.md',
@@ -666,6 +667,24 @@ def ensure_item_path_exists():
     item_path = get_item_path()
     if not item_path.exists():
         os.makedirs(item_path, exist_ok=True)
+
+def ensure_pinned_path_exists():
+    pinned_path = get_pinned_path()
+    if not pinned_path.exists():
+        os.makedirs(pinned_path, exist_ok=True)
+
+def get_pinned_path():
+    return Path(current_settings['Obsidian Vault Path']) / current_settings['Pinned']
+
+def write_pinned_message(message):
+    ensure_pinned_path_exists()
+    pinned_file = get_pinned_path() / f"{message.id}.md"
+    formatted_message = f"<{message.author.display_name}> {message.content}\n"
+    try:
+        with open(pinned_file, 'w', encoding='utf-8') as pf:
+            pf.write(formatted_message)
+    except Exception as e:
+        debug_message(f"Error writing pinned message file {pinned_file}: {e}")
 
 def ensure_current_scene_exists(file_path):
     """Create the current scene if it doesn't exist, using template if available and enabled."""
@@ -823,6 +842,11 @@ async def on_raw_reaction_add(payload):
             #delete the message.
             debug_message(f"Removing rejected GMBot mesage {message.id} content ({message.content}).")
             await channel.delete_messages([message])
+        elif not payload.emoji.is_custom_emoji() and payload.emoji.name == '📌':
+            #Save message in the pinned messages folder
+            debug_message(f"Writing pinned message file for message {message.id} content ({message.content})")
+            # TO ADD: prompt for attaching to character/location/item
+            write_pinned_message(message)            
     except Exception as e:
         debug_message(f"Error on responding to reaction {payload.emoji}: {e}")
 

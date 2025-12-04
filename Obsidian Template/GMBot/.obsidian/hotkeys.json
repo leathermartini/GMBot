@@ -1,0 +1,11 @@
+{
+  "discord-message-sender:sync-discord-messages": [
+    {
+      "modifiers": [
+        "Mod",
+        "Shift"
+      ],
+      "key": "D"
+    }
+  ]
+}
