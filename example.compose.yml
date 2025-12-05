@@ -3,7 +3,7 @@ services:
     image: ghcr.io/leathermartini/GMBot
     container_name: obsidian-discord-bot
     volumes:
-      - ${OBSIDIAN_VAULT_PATH}:/vault
+      - ${DOCKER_OBSIDIAN_VAULT_PATH}:/vault
     env_file:
       - .env
     restart: unless-stopped

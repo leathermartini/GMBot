@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.6'
+CURRENT_VERSION = '0.3.7'
 
 import os
 import json
@@ -9,6 +9,7 @@ import discord
 import requests
 import frontmatter
 import re
+import asyncio
 from ollama import Client
 from discord.ext import commands
 from discord.ext import tasks
@@ -242,7 +243,7 @@ def get_ollama_response(prompt):
 
 #Character functions
 def get_character_file(name):
-    return get_character_path() / f"{name}.md"
+    return get_character_path() /  clean_file_name(f"{name}.md")
 
 def get_character_path():
     return Path(current_settings['Obsidian Vault Path']) / current_settings['Characters']
@@ -329,7 +330,7 @@ def get_default_char_template():
 
 #Location functions
 def get_location_file(name):
-    return get_location_path() / f"{name}.md"
+    return get_location_path() /  clean_file_name(f"{name}.md")
 
 def get_location_path():
     return Path(current_settings['Obsidian Vault Path']) / current_settings['Locations']
@@ -403,7 +404,7 @@ def get_location_names(loc_name):
 
 #item functions
 def get_item_file(name):
-    return get_item_path() / f"{name}.md"
+    return get_item_path() /  clean_file_name(f"{name}.md")
 
 def get_item_path():
     return Path(current_settings['Obsidian Vault Path']) / current_settings['Items']
@@ -632,7 +633,7 @@ def set_env_settings():
     
 
 def get_current_scene_path():
-    filename = f"{current_settings['Current Scene Start']} - {current_settings['Current Scene']}.md"
+    filename = clean_file_name(f"{current_settings['Current Scene Start']} - {current_settings['Current Scene']}.md")
 
     # Construct the full path
     vault_path = Path(current_settings['Obsidian Vault Path'])
@@ -676,13 +677,21 @@ def ensure_pinned_path_exists():
 def get_pinned_path():
     return Path(current_settings['Obsidian Vault Path']) / current_settings['Pinned']
 
-def write_pinned_message(message):
+def write_pinned_message(message, file_to_append):
+    # Make sure the paths exist
     ensure_pinned_path_exists()
-    pinned_file = get_pinned_path() / f"{message.id}.md"
-    formatted_message = f"<{message.author.display_name}> {message.content}\n"
+    ensure_character_path_exists()
+    ensure_location_path_exists()
+    ensure_item_path_exists()
+    # Format the message
+    formatted_message = f"\n<{message.author.display_name}> {message.content}\n"
     try:
-        with open(pinned_file, 'w', encoding='utf-8') as pf:
-            pf.write(formatted_message)
+        if file_to_append.is_file():
+            with open(file_to_append, 'a', encoding='utf-8') as pf:
+                pf.write(formatted_message)
+        else:
+            with open(file_to_append, 'w', encoding='utf-8') as pf:
+                pf.write(formatted_message)
     except Exception as e:
         debug_message(f"Error writing pinned message file {pinned_file}: {e}")
 
@@ -736,6 +745,11 @@ def slugify(text):
     text = re.sub(r'[^\w\s-]', '', text)
     text = re.sub(r'[-\s]+', '-', text).strip('-')
     return text
+
+def clean_file_name(text):
+    new_file_name = re.sub('\"', '', re.sub("\'", "", text))
+    new_file_name = re.sub(r"[<>:/\|?*]", '-', new_file_name)
+    return new_file_name
 
 def findWholeWord(w):
     return re.compile(r'\b({0})\b'.format(w), flags=re.IGNORECASE).search
@@ -824,6 +838,8 @@ async def on_raw_reaction_add(payload):
     if channel.id != int(current_settings['Bot Channel']):
         return    
     message = await channel.fetch_message(payload.message_id)
+    response = ''
+    filepath = ''
     try:
         if not payload.emoji.is_custom_emoji() and payload.emoji.name == '✅' and message.author.id == bot.user.id and not current_settings['Current Scene Private']:
             #Log the message.
@@ -843,12 +859,104 @@ async def on_raw_reaction_add(payload):
             debug_message(f"Removing rejected GMBot mesage {message.id} content ({message.content}).")
             await channel.delete_messages([message])
         elif not payload.emoji.is_custom_emoji() and payload.emoji.name == '📌':
-            #Save message in the pinned messages folder
-            debug_message(f"Writing pinned message file for message {message.id} content ({message.content})")
-            # TO ADD: prompt for attaching to character/location/item
-            write_pinned_message(message)            
+            #Save message to either an existing file or the pinned messages folder
+            user = payload.member
+            debug_message(f"Processing pinned message {message.id} for {user.display_name} content ({message.content})")
+            dm_channel = await user.create_dm()
+            await dm_channel.send(f"You want to pin this message:\n\n{message.content}\n\nDo you want to pin this message to a (**1**) **ch**aracter, (**2**) **lo**cation, or (**3**) **it**em, or just (**4**) **sa**ve it in the Vault?")
+            res = await bot.wait_for(
+                "message",
+                check=lambda x: x.channel.id == dm_channel.id
+                and user.id == x.author.id,
+                timeout=60,
+            )
+            response = res.content
+            # Add managing character/location/etc.
+            if response == "1" or response[:2].lower() == "ch":
+                #Get character list and offer
+                character_list = get_character_list()
+                if character_list:
+                    character_list_message = "Select the character to append to by number:\n"
+                    for x in range(len(character_list)):
+                        character_list_message = character_list_message + f"(**{x+1}**) {character_list[x]}"
+                        character_list_message = character_list_message + "\n"
+                    await dm_channel.send(character_list_message)
+                    # Offer character list and wait for number response
+                    res2 = await bot.wait_for(
+                        "message",
+                        check=lambda y:y.channel.id == dm_channel.id and user.id == y.author.id,
+                        timeout=60,
+                    )
+                    if res2: # If we got a response, validate it.
+                        picked = int(res2.content) - 1
+                        if picked >= 0 and picked < len(character_list):
+                            await dm_channel.send(f"Appending message to character file for {character_list[picked]}")
+                            filepath = get_character_file(character_list[picked])
+                        else:
+                            await dm_channel.send(f"Invalid response. Remove  Remove 📌 reaction and put it back to try again.")
+                            return
+            elif response == "2" or response[:2].lower() == "lo":
+                # Get location list and offer
+                location_list = get_location_list()
+                if location_list:
+                    location_list_message = "Select the location to append to by number:\n"
+                    for x in range(len(location_list)):
+                        location_list_message = location_list_message + f"(**{x+1}**) {location_list[x]}"
+                        location_list_message = location_list_message + "\n"
+                    await dm_channel.send(location_list_message)
+                    # Send location list and wait for response.
+                    res2 = await bot.wait_for(
+                        "message",
+                        check=lambda y:y.channel.id == dm_channel.id and user.id == y.author.id,
+                        timeout=60,
+                    )
+                    if res2: # Validate response
+                        picked = int(res2.content) - 1
+                        if picked >= 0 and picked < len(location_list):
+                            await dm_channel.send(f"Appending message to location file for {location_list[picked]}")
+                            filepath = get_location_file(location_list[picked])             
+                        else:
+                            await dm_channel.send(f"Invalid response. Remove  Remove 📌 reaction and put it back to try again.")
+                            return
+            elif response == "3" or response[:2].lower() == "it":
+                # Get item list and offer
+                item_list = get_item_list()
+                if item_list:
+                    item_list_message = "Select the item to append to by number:\n"
+                    for x in range(len(item_list)):
+                        item_list_message = item_list_message + f"(**{x+1}**) {item_list[x]}"
+                        item_list_message = item_list_message + "\n"
+                    await dm_channel.send(item_list_message)
+                    # Send location list and wait for response.
+                    res2 = await bot.wait_for(
+                        "message",
+                        check=lambda y:y.channel.id == dm_channel.id and user.id == y.author.id,
+                        timeout=60,
+                    )
+                    if res2: # Validate response
+                        picked = int(res2.content) - 1
+                        if picked >= 0 and picked < len(item_list):
+                            await dm_channel.send(f"Appending message to item file for {item_list[picked]}")
+                            filepath = get_item_file(item_list[picked])             
+                        else:
+                            await dm_channel.send(f"Invalid response. Remove  Remove 📌 reaction and put it back to try again.")
+                            return
+            elif response == "4" or response[:2].lower() == "sa":
+                debug_message(f"Writing to pinned message file")
+                await dm_channel.send(f"Writing message to pinned message folder in file {message.id}")
+                filepath = get_pinned_path() / f"{message.id}.md"
+            else:
+                # Send message saying it's cancelling
+                await dm_channel.send(f"Cancelling request. Message not saved. Remove 📌 reaction and put it back to try again.")
+                return
+    except asyncio.TimeoutError:
+        await dm_channel.send(f"Cancelling request. Message not saved. Remove 📌 reaction and put it back to try again.")
+        return
     except Exception as e:
         debug_message(f"Error on responding to reaction {payload.emoji}: {e}")
+    if filepath:
+        # When there's a file path costructed, append this message to the end of the file selected.
+        write_pinned_message(message, filepath)
 
 # Run the bot
 if __name__ == "__main__":
