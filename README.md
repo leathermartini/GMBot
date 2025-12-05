@@ -26,9 +26,10 @@ A Discord bot logs Discord messages into an Obsidian file to be used as referenc
    # Path to your Obsidian vault
    # For local Python deployment: Use absolute path to your vault
    # Example: /Users/username/Documents/ObsidianVault
-   # For Docker deployment: leave this as /vault and map your local vault path to /vault in the container
+   # For Docker deployment: leave this as /vault and uncomment the DOCKER_OBSIDIAN_VAULT_PATH, set that to the path to your Obsidian file.
    # Example: /Users/username/Documents/ObsidianVault:/vault
-   OBSIDIAN_VAULT_PATH=<path to the obsidian vaul>
+   OBSIDIAN_VAULT_PATH="/vault"
+   #DOCKER_OBSIDIAN_VAULT_PATH=""
    
    # Channel ID of the Discord channel where the bot will operate
    BOT_CHANNEL_ID=<your channel id>
