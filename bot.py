@@ -323,10 +323,55 @@ def get_default_char_template():
     try:
         with open(template_file, "r", encoding='utf-8') as tf:
             template = frontmatter.load(tf)
+    except FileNotFoundError:
+        debug_message(f"Default Character Template not found, creating base version.")
+        template = build_default_char_template()        
     except Exception as e:
         debug_message(f"Error reading character template file: {e}")
         template = "error"
     return template
+
+def build_default_char_template():
+    base_character_template_yaml = '''---
+aliases:
+ℹ️Species:
+ℹ️Class:
+👁️‍🗨️Description:
+🗪Reputation:
+📝Notes:
+🔗Connected:
+👤Related NPCs:
+🔗Related Factions:
+💚Allied:
+❌Opposed:
+📍Related Locations:
+⁉️Related Quests:
+🧸Related Items:
+📰Notable Events:
+🤐Rumors & Secrets:
+🎯Objective:
+⚔️Statblock:
+🔹NPC:
+tags:
+    - ✴️/📝Template
+Status:
+---'''
+    base_character_template = frontmatter.loads(base_character_template_yaml)
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Characters'] / current_settings['Character template']
+    ensure_character_path_exists()
+    try:
+        if template_file.is_file():
+            debug_message(f"Found existing character template file, updating to match current version.")
+            with open(template_file, 'r', encoding='utf-8') as tf:
+                curr_char_template = frontmatter.load(tf)
+            for key in curr_char_template.keys():
+                base_character_template[key] = curr_char_template[key]
+        debug_message(f"Writing default character template file.")
+        with open(template_file, 'w', encoding='utf-8') as tf:
+            tf.write(frontmatter.dumps(base_character_template))
+    except Exception as e:
+        debug_message(f"Error writing/updating character template file: {e}")
+    return base_character_template
 
 #Location functions
 def get_location_file(name):
@@ -352,10 +397,35 @@ def get_default_loc_template():
     try:
         with open(template_file, "r", encoding='utf-8') as tf:
             template = frontmatter.load(tf)
+    except FileNotFoundError:
+        template = build_default_loc_template()
     except Exception as e:
         debug_message(f"Error reading location template file: {e}")
         template = "error"
     return template
+
+def build_default_loc_template():
+    base_location_template_yaml = '''---
+aliases:
+📌location_type:
+👁️‍🗨️Description:
+---'''
+    base_location_template = frontmatter.loads(base_location_template_yaml)
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Locations'] / current_settings['Location template']
+    ensure_location_path_exists()
+    try:
+        if template_file.is_file():
+            debug_message(f"Found existing location template file, updating to match current version.")
+            with open(template_file, 'r', encoding='utf-8') as tf:
+                curr_loc_template = frontmatter.load(tf)
+            for key in curr_loc_template.keys():
+                base_location_template[key] = curr_loc_template[key]
+        debug_message(f"Writing default location template file.")
+        with open(template_file, 'w', encoding='utf-8') as tf:
+            tf.write(frontmatter.dumps(base_location_template))
+    except Exception as e:
+        debug_message(f"Error writing/updating location template file: {e}")
+    return base_location_template
 
 def select_location_list(location_list, to_get):
     # Returns just the specified type of locations from a list of locations.
@@ -426,10 +496,34 @@ def get_default_item_template():
     try:
         with open(template_file, "r", encoding='utf-8') as tf:
             template = frontmatter.load(tf)
+    except FileNotFoundError:
+        template = build_default_item_template()
     except Exception as e:
         debug_message(f"Error reading item template file: {e}")
         template = "error"
     return template
+
+def build_default_item_template():
+    base_item_template_yaml = '''---
+aliases:
+👁️‍🗨️Description:
+---'''
+    base_item_template = frontmatter.loads(base_item_template_yaml)
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Items'] / current_settings['Item template']
+    ensure_item_path_exists()
+    try:
+        if template_file.is_file():
+            debug_message(f"Found existing litem template file, updating to match current version.")
+            with open(template_file, 'r', encoding='utf-8') as tf:
+                curr_item_template = frontmatter.load(tf)
+            for key in curr_item_template.keys():
+                base_item_template[key] = curr_item_template[key]
+        debug_message(f"Writing default item template file.")
+        with open(template_file, 'w', encoding='utf-8') as tf:
+            tf.write(frontmatter.dumps(base_item_template))
+    except Exception as e:
+        debug_message(f"Error writing/updating item template file: {e}")
+    return base_item_template
 
 def get_all_items_in_scene(scene_file):
     items = get_item_list()
@@ -726,7 +820,6 @@ def append_to_scene(file_path, author, content):
     """Append content to the current scene with timestamp."""
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     formatted_content = f"{current_time}: <{author}> {content}\n"
-
     try:
         with open(file_path, 'a', encoding='utf-8') as f:
             f.write(formatted_content)
@@ -972,7 +1065,6 @@ if __name__ == "__main__":
         raise ValueError("Discord token not found in .env file")
     if not current_settings['Obsidian Vault Path']:
         raise ValueError("Obsidian vault path not found in .env file")
-
     debug_message("Bot is starting...", current_settings['debug'])
     ai_gm_watcher.start()
     bot.run(current_settings['Bot Discord Token'])
