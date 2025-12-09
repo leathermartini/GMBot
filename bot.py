@@ -876,6 +876,7 @@ def get_current_scene_path():
         # Create the folder if it doesn't exist
         debug_message(f"GMBot Scene location specified, ensuring {vault_path}/{current_settings['folder']}/{filename} exists...", current_settings['debug'])
         folder_path = vault_path / current_settings['folder']
+        folder_path = vault_path / current_settings['folder']
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path / filename
     else:
@@ -981,7 +982,8 @@ def slugify(text):
     return text
 
 def clean_file_name(text):
-    new_file_name = re.sub('\"', '', re.sub("\'", "", text))
+    #new_file_name = re.sub('\"', '', re.sub("\'", "", text))
+    new_file_name = text
     new_file_name = re.sub(r"[<>:/\|?*]", '-', new_file_name)
     return new_file_name
 
