@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.7'
+CURRENT_VERSION = '0.3.8'
 
 import os
 import json
@@ -58,13 +58,15 @@ async def debug(ctx): #Creates slash command /gmbdebug
 
 @gmbot_commands.command(description="Builds a request from the AI GM using the current prompt and the contents of the current scene.")
 async def ask_the_gm(ctx, additional: discord.Option(str, 'Any additional instructions or information', required = False, default = '')):
-    debug_message('Building the full prompt')
-    prompt = f"{build_prompt()}\n\nAdditional Information and instructions are:\n{additional}"
-    debug_message(f"Built this prompt:\n{prompt}")
+    debug_message('Building an ask file')
     to_ask_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt-request.tmp"
+    prompt_content = {
+        'additional': additional,
+        'scene_file': str(get_current_scene_path())
+    }
     try:
         with open(to_ask_file, 'w', encoding='utf-8') as request:
-            request.write(prompt)
+            request.write(json.dumps(prompt_content))
         status = 'Asking the GM.'
         if current_settings['Current Scene Private']:
             status = f"{status} But the current scene is private, so the GM will not have the scene log. Responses may be more unexpected."
@@ -210,16 +212,18 @@ async def ai_gm_watcher():
         debug_message(f"Found it!")
         try:
             with open(ai_ask_file, 'r', encoding='utf-8') as ask:
-                prompt = ask.read()
+                prompt_info = json.load(ask)
         except Exception as e:
             debug_message(f"Error opening ai ask file {ai_ask_file}: {e}", current_settings['debug'])
             return
-        if prompt:
+        if prompt_info:
             try:
                 os.remove(ai_ask_file)
             except Exception as e:
                 debug_message(f"Error removing file {ai_ask_file}: {e}")
                 return
+            prompt = build_prompt(Path(prompt_info['scene_file']), prompt_info['additional'])
+            debug_message(f"FULL PROMPT----\n\n{prompt}")
             ai_response = get_ollama_response(prompt)
             debug_message(f"Got AI response {ai_response}", current_settings['debug'])
             channel = bot.get_channel(int(current_settings['Bot Channel']))
@@ -251,10 +255,14 @@ def get_character_path():
 def get_character_list():
     ensure_character_path_exists()
     character_path = get_character_path()
+    characters = []
     try:
         raw_characters = os.listdir(character_path)
         raw_characters.remove(current_settings['Character template'])  # Remove the template file from the list    
-        characters = [i[:-3] for i in raw_characters] # Remove file extension from the character names
+        for i in raw_characters:
+            i_path = get_character_file(i[:-3])
+            if i_path.is_file() and i[:1] != '_': # If it's not a directory nor starting with _
+                characters.append(i[:-3]) # Remove file extension from the character names
     except Exception as e:
         debug_message(f"Error getting character list: {e}")
         characters = []
@@ -266,6 +274,7 @@ def get_pc_list(character_file_list, is_pc=True):
         results = []
         ensure_character_path_exists()
         for x in character_file_list:
+            update_character(x)
             with open(get_character_file(x), "r", encoding="utf-8") as cf:
                 temp_char = frontmatter.load(cf)
             if is_pc and not temp_char['🔹NPC']:
@@ -307,26 +316,83 @@ def get_scene_log(scene_file):
     return scene_log
 
 def get_character_names(char_name):
+    #Start with the name of the file
     aliases = [char_name]
+    #Make sure the expected fields are present
+    update_character(char_name)
+    #Load the file
     try:
         with open(get_character_file(char_name), 'r', encoding='utf-8') as cf:
             character_data = frontmatter.load(cf)
     except Exception as e:
+        #If there's a problem, log it and return just the name
         debug_message(f"Error getting character file for {char_name}: {e}", current_settings['debug'])
+        return aliases
+    #If there are aliases
     if character_data['aliases']:
+        #step through them and add them to the list
         for a in character_data['aliases']:
             aliases.append(a)
+    #return the list of aliases
     return aliases
+
+def update_character(char_name):
+    # Loads a character from file and adds all current character template frontmatter to it.
+    character_file = get_character_file(char_name)
+    #load the character from file
+    try:
+        with open(character_file, 'r', encoding='utf-8') as cf:
+            character = frontmatter.load(cf)
+    except Exception as e:
+        #problem? log it and quit
+        debug_message(f"Error loading character file for {char_name}: {e}")
+        return False
+    # load the default template
+    char_template = get_default_char_template()
+    # For each key in the template
+    for key in list(char_template.keys()):
+        # if the character doesn't already have it
+        if not key in list(character.keys()):
+            # add the default value
+            character[key] = char_template[key]
+    try:
+        with open(character_file, 'w', encoding='utf-8') as cf:
+            cf.write(frontmatter.dumps(character))
+    except Exception as e:
+        debug_message(f"Error writing updated character file for {char_name}: {e}")
+        return False
+    return True
 
 def get_default_char_template():
     template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Characters'] / current_settings['Character template']
     try:
         with open(template_file, "r", encoding='utf-8') as tf:
             template = frontmatter.load(tf)
+    except FileNotFoundError:
+        debug_message(f"Default Character Template not found, creating base version.")
+        template = build_default_char_template()        
     except Exception as e:
         debug_message(f"Error reading character template file: {e}")
         template = "error"
     return template
+
+def build_default_char_template():
+    base_character_template = frontmatter.loads(current_settings['Default Character Template YAML'])
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Characters'] / current_settings['Character template']
+    ensure_character_path_exists()
+    try:
+        if template_file.is_file():
+            debug_message(f"Found existing character template file, updating to match current version.")
+            with open(template_file, 'r', encoding='utf-8') as tf:
+                curr_char_template = frontmatter.load(tf)
+            for key in curr_char_template.keys():
+                base_character_template[key] = curr_char_template[key]
+        debug_message(f"Writing default character template file.")
+        with open(template_file, 'w', encoding='utf-8') as tf:
+            tf.write(frontmatter.dumps(base_character_template))
+    except Exception as e:
+        debug_message(f"Error writing/updating character template file: {e}")
+    return base_character_template
 
 #Location functions
 def get_location_file(name):
@@ -338,10 +404,14 @@ def get_location_path():
 def get_location_list():
     ensure_location_path_exists()
     location_path = get_location_path()
+    locations = []
     try:
         raw_locations = os.listdir(location_path)
         raw_locations.remove(current_settings['Location template'])  # Remove the template file from the list    
-        locations = [i[:-3] for i in raw_locations] # Remove file extension from the location names
+        for i in raw_locations:
+            i_path = get_location_file(i[:-3])
+            if i_path.is_file() and i[:1] != '_': # If it's not a directory nor starting with _
+                locations.append(i[:-3]) # Remove file extension from the character names
     except Exception as e:
         debug_message(f"Error getting location list: {e}")
         locations = []
@@ -352,10 +422,30 @@ def get_default_loc_template():
     try:
         with open(template_file, "r", encoding='utf-8') as tf:
             template = frontmatter.load(tf)
+    except FileNotFoundError:
+        template = build_default_loc_template()
     except Exception as e:
         debug_message(f"Error reading location template file: {e}")
         template = "error"
     return template
+
+def build_default_loc_template():
+    base_location_template = frontmatter.loads(current_settings['Default Location Template YAML'])
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Locations'] / current_settings['Location template']
+    ensure_location_path_exists()
+    try:
+        if template_file.is_file():
+            debug_message(f"Found existing location template file, updating to match current version.")
+            with open(template_file, 'r', encoding='utf-8') as tf:
+                curr_loc_template = frontmatter.load(tf)
+            for key in curr_loc_template.keys():
+                base_location_template[key] = curr_loc_template[key]
+        debug_message(f"Writing default location template file.")
+        with open(template_file, 'w', encoding='utf-8') as tf:
+            tf.write(frontmatter.dumps(base_location_template))
+    except Exception as e:
+        debug_message(f"Error writing/updating location template file: {e}")
+    return base_location_template
 
 def select_location_list(location_list, to_get):
     # Returns just the specified type of locations from a list of locations.
@@ -391,16 +481,52 @@ def match_locations_in_log(loc_name, log):
     return found
 
 def get_location_names(loc_name):
+    # Start with the location name
     aliases = [loc_name]
+    #Make sure the location matches the expected template
+    update_location(loc_name)
+    # Locat the location information
     try:
         with open(get_location_file(loc_name), 'r', encoding='utf-8') as lf:
             location_data = frontmatter.load(lf)
     except Exception as e:
+        #Error loading, log it and return the base name only
         debug_message(f"Error getting location file for {loc_name}: {e}", current_settings['debug'])
+        return aliases
+    # If there are aliases
     if location_data['aliases']:
+        #Add them all to the list of aliases
         for a in location_data['aliases']:
             aliases.append(a)
+    #return the list of aliases
     return aliases
+
+def update_location(loc_name):
+    # Loads a location from file and adds all current location template frontmatter to it.
+    location_file = get_location_file(loc_name)
+    #load the location from file
+    try:
+        with open(location_file, 'r', encoding='utf-8') as lf:
+            location = frontmatter.load(lf)
+    except Exception as e:
+        #problem? log it and quit
+        debug_message(f"Error loading location file for {loc_name}: {e}")
+        return False
+    # load the default template
+    loc_template = get_default_loc_template()
+    # For each key in the template
+    for key in list(loc_template.keys()):
+        # if the location doesn't already have it
+        if not key in list(location.keys()):
+            # add the default value
+            location[key] = loc_template[key]
+    try:
+        with open(location_file, 'w', encoding='utf-8') as lf:
+            lf.write(frontmatter.dumps(location))
+    except Exception as e:
+        debug_message(f"Error writing updated location file for {loc_name}: {e}")
+        return False
+    return True
 
 #item functions
 def get_item_file(name):
@@ -412,10 +538,14 @@ def get_item_path():
 def get_item_list():
     ensure_item_path_exists()
     item_path = get_item_path()
+    items = []
     try:
         raw_items = os.listdir(item_path)
         raw_items.remove(current_settings['Item template'])  # Remove the template file from the list    
-        items = [i[:-3] for i in raw_items] # Remove file extension from the item names
+        for i in raw_items:
+            i_path = get_item_file(i[:-3])
+            if i_path.is_file() and i[:1] != '_': # If it's not a directory nor starting with _
+                items.append(i[:-3]) # Remove file extension from the item names
     except Exception as e:
         debug_message(f"Error getting item list: {e}")
         items = []
@@ -426,41 +556,112 @@ def get_default_item_template():
     try:
         with open(template_file, "r", encoding='utf-8') as tf:
             template = frontmatter.load(tf)
+    except FileNotFoundError:
+        template = build_default_item_template()
     except Exception as e:
         debug_message(f"Error reading item template file: {e}")
         template = "error"
     return template
 
+def build_default_item_template():
+    base_item_template = frontmatter.loads(current_settings['Default Item Template YAML'])
+    template_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Items'] / current_settings['Item template']
+    ensure_item_path_exists()
+    try:
+        if template_file.is_file():
+            debug_message(f"Found existing litem template file, updating to match current version.")
+            with open(template_file, 'r', encoding='utf-8') as tf:
+                curr_item_template = frontmatter.load(tf)
+            for key in curr_item_template.keys():
+                base_item_template[key] = curr_item_template[key]
+        debug_message(f"Writing default item template file.")
+        with open(template_file, 'w', encoding='utf-8') as tf:
+            tf.write(frontmatter.dumps(base_item_template))
+    except Exception as e:
+        debug_message(f"Error writing/updating item template file: {e}")
+    return base_item_template
+
 def get_all_items_in_scene(scene_file):
+    #Get the full list of items
     items = get_item_list()
+    #Get the scene log
     scene_log = get_scene_log(scene_file)
+    #start with nothing found
     item_found = []
+    #if there are items
     if items:
+        #for each of them
         for it in items:
+            #If it or its alias is in the log
             if match_items_in_log(it, scene_log):
+                #Add it to the list of items in the scene
                 item_found.append(it)
+    #Return the list
     return item_found
 
 def match_items_in_log(item_name, log):
+    # Get a list of the item's aliases
     item_alias_list = get_item_names(item_name)
+    # assume it's not there
     found = False
+    # For each alias
     for it in item_alias_list:
+        # If it's there...
         if findWholeWord(it)(log):
+            #We found it! 
             found = True
+            # stop looking
             break
+    #Return if we found it or not.
     return found
 
 def get_item_names(item_name):
+    # Start with the name of the item
     aliases = [item_name]
+    # update to include all default keys
+    update_item(item_name)
+    #Load the item file
     try:
         with open(get_item_file(item_name), 'r', encoding='utf-8') as itf:
             item_data = frontmatter.load(itf)
     except Exception as e:
+        #If there's an error, log it and return just the name as the alias
         debug_message(f"Error getting item file for {item_name}: {e}", current_settings['debug'])
+        return aliases
+    # If there are aliases
     if item_data['aliases']:
+        #Add each alias to the list
         for a in item_data['aliases']:
             aliases.append(a)
+    #return the list of aliases
     return aliases
+
+def update_item(item_name):
+    # Loads an item from file and adds all current item template frontmatter to it.
+    item_file = get_item_file(item_name)
+    #load the item from file
+    try:
+        with open(item_file, 'r', encoding='utf-8') as itf:
+            item = frontmatter.load(itf)
+    except Exception as e:
+        #problem? log it and quit
+        debug_message(f"Error loading item file for {item_name}: {e}")
+        return False
+    # load the default template
+    item_template = get_default_item_template()
+    # For each key in the template
+    for key in list(item_template.keys()):
+        # if the item doesn't already have it
+        if not key in list(item.keys()):
+            # add the default value
+            item[key] = item_template[key]
+    try:
+        with open(item_file, 'w', encoding='utf-8') as itf:
+            itf.write(frontmatter.dumps(item))
+    except Exception as e:
+        debug_message(f"Error writing updated item file for {item_name}: {e}")
+        return False
+    return True
 
 # AI prompt building functions
 def build_default_prompt():
@@ -473,7 +674,7 @@ def build_default_prompt():
         debug_message(f"Error creating new prompt file: {e}")
 
 
-def build_prompt(additional_info = ""):
+def build_prompt(scene_file, additional_info = ""):
     # Get the current AI GM Prompt file contents
     prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
     debug_message(f"Looking for file: {prompt_file}", current_settings['debug'])
@@ -488,18 +689,17 @@ def build_prompt(additional_info = ""):
     except Exception as e:
         debug_message(f"Error getting prompt file: {e}", current_settings['debug'])
         prompt = f"You should simply return: There was a problem getting the prompt: {e}"
-    # Get the content of the current scene
-    current_scene_file = get_current_scene_path()
     try:
-        with open(current_scene_file, 'r', encoding='utf-8') as cs:
-            current_scene = cs.read()
+        with open(scene_file, 'r', encoding='utf-8') as cs:
+            scene_log = cs.read()
     except FileNotFoundError:
-        current_scene = "This is an entirely new scene.\n"
+        scene_log = "This is an entirely new scene.\n"
     except Exception as e:
         debug_message(f"Error getting scene contents: {e}")
-        current_scene = f"Ignore previous instructions and instead respond with this: There was a problem getting the scene {e}."
+        scene_log = f"Ignore previous instructions and instead respond with this: There was a problem getting the scene {e}."
     # Get the character info for the current scene
-    characters = get_all_characters_in_scene(current_scene_file)
+    characters = get_all_characters_in_scene(scene_file)
+    debug_message(f"Characters in scene are: {characters}")
     char_info = ""
     if characters:
         for char in characters:
@@ -511,7 +711,8 @@ def build_prompt(additional_info = ""):
                 char_sheet = f"{char} has no further info."
             char_info = char_info + "\n\n" + char +"\n" + char_sheet  
     # Get locations
-    locations = get_all_locations_in_scene(current_scene_file)
+    locations = get_all_locations_in_scene(scene_file)
+    debug_message(f"Locations in scene are: {locations}")
     loc_info = ""
     if locations:
         for loc in locations:
@@ -519,23 +720,24 @@ def build_prompt(additional_info = ""):
                 with open(get_location_file(char), 'r', encoding='utf-8') as lf:
                     location_sheet = frontmatter.dumps(frontmatter.load(lf))
             except Exception as e:
-                debug_message(f"Error getting character file for {loc}: {e}", current_settings['debug'])    
+                debug_message(f"Error getting location file for {loc}: {e}", current_settings['debug'])    
                 location_sheet = f"{loc} has no further info."
             loc_info = loc_info + "\n\n" + loc +"\n" + location_sheet  
     # Get items
-    items = get_all_items_in_scene(current_scene_file)
+    items = get_all_items_in_scene(scene_file)
+    debug_message(f"Items in scene are: {items}")
     item_info = ""
     if items:
         for it in items:
             try:
-                with open(get_location_file(it), 'r', encoding='utf-8') as itf:
+                with open(get_item_file(it), 'r', encoding='utf-8') as itf:
                     item_sheet = frontmatter.dumps(frontmatter.load(itf))
             except Exception as e:
-                debug_message(f"Error getting character file for {it}: {e}", current_settings['debug'])    
+                debug_message(f"Error getting item file for {it}: {e}", current_settings['debug'])    
                 item_sheet = f"{it} has no further info."
             item_info = item_info + "\n\n" + it +"\n" + item_sheet  
     # Build and return a prompt with the scene information
-    return f"{prompt}\n\nThe characters in this scene are:\n{char_info}\n\nThe locations in this scene are:\n{loc_info}\n\nThe important items in this scene are:\n{item_info}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{current_scene}"
+    return f"{prompt}\n\nThe players provided this additional information or instruction:\n{additional_info}\n\nThe characters in this scene are:\n{char_info}\n\nThe locations in this scene are:\n{loc_info}\n\nThe important items in this scene are:\n{item_info}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{scene_log}"
 
 # Other functions
 def debug_message(message, debug_log=False):
@@ -543,7 +745,7 @@ def debug_message(message, debug_log=False):
     file_path = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "Debug Log.md"
     formatted_content = f"{current_time}: {message}\n"
     print(formatted_content)
-    if debug_log:
+    if debug_log or current_settings['debug']:
         try:
             with open(file_path, 'a', encoding='utf-8') as f:
                 f.write(formatted_content)
@@ -597,7 +799,40 @@ def get_gmbot_settings():
             'Obsidian Vault Path': os.getenv('OBSIDIAN_VAULT_PATH'),
             'Ollama URL': os.getenv('OLLAMA_URL'),
             'Default AI GM Prompt': 'You are a Game Master for a Dungeons and Dragons game.\n',
-            'Ollama Model': os.getenv('OLLAMA_MODEL')
+            'Ollama Model': os.getenv('OLLAMA_MODEL'),
+            'Default Character Template YAML': '''---
+aliases:
+ℹ️Species:
+ℹ️Class:
+👁️‍🗨️Description:
+🗪Reputation:
+📝Notes:
+🔗Connected:
+👤Related NPCs:
+🔗Related Factions:
+💚Allied:
+❌Opposed:
+📍Related Locations:
+⁉️Related Quests:
+🧸Related Items:
+📰Notable Events:
+🤐Rumors & Secrets:
+🎯Objective:
+⚔️Statblock:
+🔹NPC:
+tags:
+    - ✴️/📝Template
+Status:
+---''',
+            'Default Location Template YAML': '''---
+aliases:
+📌location_type:
+👁️‍🗨️Description:
+---''',
+            'Default Item Template YAML': '''---
+aliases:
+👁️‍🗨️Description:
+---'''
         }
 
     try:
@@ -640,6 +875,7 @@ def get_current_scene_path():
     if current_settings['folder']:
         # Create the folder if it doesn't exist
         debug_message(f"GMBot Scene location specified, ensuring {vault_path}/{current_settings['folder']}/{filename} exists...", current_settings['debug'])
+        folder_path = vault_path / current_settings['folder']
         folder_path = vault_path / current_settings['folder']
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path / filename
@@ -726,7 +962,6 @@ def append_to_scene(file_path, author, content):
     """Append content to the current scene with timestamp."""
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     formatted_content = f"{current_time}: <{author}> {content}\n"
-
     try:
         with open(file_path, 'a', encoding='utf-8') as f:
             f.write(formatted_content)
@@ -747,7 +982,8 @@ def slugify(text):
     return text
 
 def clean_file_name(text):
-    new_file_name = re.sub('\"', '', re.sub("\'", "", text))
+    #new_file_name = re.sub('\"', '', re.sub("\'", "", text))
+    new_file_name = text
     new_file_name = re.sub(r"[<>:/\|?*]", '-', new_file_name)
     return new_file_name
 
@@ -972,7 +1208,6 @@ if __name__ == "__main__":
         raise ValueError("Discord token not found in .env file")
     if not current_settings['Obsidian Vault Path']:
         raise ValueError("Obsidian vault path not found in .env file")
-
     debug_message("Bot is starting...", current_settings['debug'])
     ai_gm_watcher.start()
     bot.run(current_settings['Bot Discord Token'])
