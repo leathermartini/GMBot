@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.9'
+CURRENT_VERSION = '0.3.10'
 
 import os
 import json
@@ -259,7 +259,7 @@ def get_ollama_response(prompt):
             },
             {
                 'role': 'user',
-                'content': f"The players ask:\n {prompt['additional']}\n\n Do NOT act or speak for the players or their characters.\n Ask the players for rolls when outcomes are uncertain, but do not roll them yourself.\n Do not use date or time stamps. Keep your responses to less than 4000 characters, with complete sentences.",
+                'content': f"The players ask:\n {prompt['additional']}\n\n Reminders: {prompt['reminder']}",
             },
         ]
         #debug_message(f"Ollama messages:\n\n{message_history}")
@@ -699,16 +699,26 @@ def build_default_prompt():
     except Exception as e:
         debug_message(f"Error creating new prompt file: {e}")
 
+def build_default_reminder():
+    reminder_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Reminders.md"
+    try:
+        with open(reminder_file, 'w', encoding='utf-8') as f:
+            f.write(current_settings['Default AI GM Reminder'])
+        debug_message('Created new Reminders file.', current_settings['debug'])
+    except Exception as e:
+        debug_message(f"Error creating new Reminders file: {e}")        
 
 def build_prompt(scene_file, additional_info = ""):
     # Get the current AI GM Prompt file contents
     prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
-    debug_message(f"Looking for file: {prompt_file}", current_settings['debug'])
+    reminder_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Reminders.md"
+    debug_message(f"Looking for filew:\n - {prompt_file}\n - {reminder_file}", current_settings['debug'])
     if not additional_info:
         additional_info = "What happens next?"
     prompt = {
         'prompt': 'Empty Prompt',
         'additional': additional_info,
+        'reminder': '',
         'character data': '',
         'location data': '',
         'item data': '', 
@@ -725,6 +735,17 @@ def build_prompt(scene_file, additional_info = ""):
     except Exception as e:
         debug_message(f"Error getting prompt file: {e}", current_settings['debug'])
         prompt['prompt'] = f"You should simply return: There was a problem getting the prompt: {e}"
+    try:
+        with open(reminder_file, 'r', encoding='utf-8') as f:
+            prompt['reminder'] = f.read()
+            debug_message(f"Got the following reminder: {prompt['reminder']}")
+    except FileNotFoundError:
+        build_default_reminder()
+        prompt['reminder'] = current_settings['Default AI GM Reminder']
+        debug_message(f"Built Default reminder: {prompt['reminder']}")
+    except Exception as e:
+        debug_message(f"Error getting reminder file: {e}", current_settings['debug'])
+        prompt['reminder'] = f"You should simply return: There was a problem getting the reminder: {e}"
     try:
         with open(scene_file, 'r', encoding='utf-8') as cs:
             prompt['scene log'] = cs.read()
@@ -832,6 +853,7 @@ def get_gmbot_settings():
             'Obsidian Vault Path': os.getenv('OBSIDIAN_VAULT_PATH'),
             'Ollama URL': os.getenv('OLLAMA_URL'),
             'Default AI GM Prompt': 'You are a Game Master for a Dungeons and Dragons game.\n',
+            'Default AI GM Reminder': 'Do not act for the players',
             'Ollama Model': os.getenv('OLLAMA_MODEL'),
             'Default Character Template YAML': '''---
 aliases:
