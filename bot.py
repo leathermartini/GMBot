@@ -259,7 +259,7 @@ def get_ollama_response(prompt):
             },
             {
                 'role': 'user',
-                'content': f"The players ask:\n {prompt['additional']}\n\n Do not act or speak for the players or their characters.\n Do not roll dice. You may ask the players to roll for actions.\n Do not use date or time stamps. Keep your responses to less than 4000 characters, with complete sentences.",
+                'content': f"The players ask:\n {prompt['additional']}\n\n Do NOT act or speak for the players or their characters.\n Ask the players for rolls when outcomes are uncertain, but do not roll them yourself.\n Do not use date or time stamps. Keep your responses to less than 4000 characters, with complete sentences.",
             },
         ]
         #debug_message(f"Ollama messages:\n\n{message_history}")
