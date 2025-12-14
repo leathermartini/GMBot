@@ -1,7 +1,7 @@
 # GMBot
 # Current version
 # MUST INCREMENT WHEN current_settings structure changes.
-CURRENT_VERSION = '0.3.8'
+CURRENT_VERSION = '0.3.9'
 
 import os
 import json
@@ -203,7 +203,7 @@ async def get_items(ctx):
     await ctx.respond(results)
 
 #Watcher for AI prompts
-@tasks.loop(seconds=10) # Every 300 seconds look for a file
+@tasks.loop(seconds=120) # Every 120 seconds look for a file
 async def ai_gm_watcher():
     """Watches for a request file"""
     ai_ask_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt-request.tmp"
@@ -235,13 +235,39 @@ async def ai_gm_watcher():
 # Feeds a prompt to Ollama and gets the response.
 def get_ollama_response(prompt):
     ollama_connection = Client(host=current_settings['Ollama URL'])
-    response = ollama_connection.chat(model=current_settings['Ollama Model'], messages=[
-        {
-            'role': 'user',
-            'content': prompt,
-        },
-    ])
-    debug_message(f"Ollama sent back: {response.message.content}", current_settings['debug'])
+    try:
+        message_history=[
+            {
+                'role': 'system',
+                'content': prompt['prompt'],
+            },
+            {
+                'role': 'assistant',
+                'content': f"Characters in the scene are:\n {prompt['character data']}",
+            },
+            {
+                'role': 'assistant',
+                'content': f"Locations in the scene are:\n {prompt['location data']}",
+            },
+            {
+                'role': 'assistant',
+                'content': f"important items in the scene are:\n {prompt['item data']}",
+            },
+            {
+                'role': 'assistant',
+                'content': f"The log of the scene so far is:\n {prompt['scene log']}",
+            },
+            {
+                'role': 'user',
+                'content': f"The players ask:\n {prompt['additional']}\n\n Do not act or speak for the players or their characters.\n Do not roll dice. You may ask the players to roll for actions.\n Do not use date or time stamps.",
+            },
+        ]
+        #debug_message(f"Ollama messages:\n\n{message_history}")
+        response = ollama_connection.chat(model=current_settings['Ollama Model'], messages=message_history, options={"num_predict": 400})
+        debug_message(f"Ollama sent back: {response.message.content}", current_settings['debug'])
+    except Exception as e:
+        debug_message(f"Error getting Ollama response: {e}", current_settings['debug'])
+        return f"Error getting Ollama response from {current_settings['Ollama URL']}: {e}"
     return response.message.content
 
 
@@ -678,29 +704,38 @@ def build_prompt(scene_file, additional_info = ""):
     # Get the current AI GM Prompt file contents
     prompt_file = Path(current_settings['Obsidian Vault Path']) / current_settings['Settings Folder'] / "AI GM Prompt.md"
     debug_message(f"Looking for file: {prompt_file}", current_settings['debug'])
+    if not additional_info:
+        additional_info = "What happens next?"
+    prompt = {
+        'prompt': 'Empty Prompt',
+        'additional': additional_info,
+        'character data': '',
+        'location data': '',
+        'item data': '', 
+        'scene log': ''
+    }
     try:
         with open(prompt_file, 'r', encoding='utf-8') as f:
-            prompt = f.read()
-            debug_message(f"Got the following prompt: {prompt}")
+            prompt['prompt'] = f.read()
+            debug_message(f"Got the following prompt: {prompt['prompt']}")
     except FileNotFoundError:
         build_default_prompt()
-        prompt = current_settings['Default AI GM Prompt']
-        debug_message(f"Built Default prompt: {prompt}")
+        prompt['prompt'] = current_settings['Default AI GM Prompt']
+        debug_message(f"Built Default prompt: {prompt['prompt']}")
     except Exception as e:
         debug_message(f"Error getting prompt file: {e}", current_settings['debug'])
-        prompt = f"You should simply return: There was a problem getting the prompt: {e}"
+        prompt['prompt'] = f"You should simply return: There was a problem getting the prompt: {e}"
     try:
         with open(scene_file, 'r', encoding='utf-8') as cs:
-            scene_log = cs.read()
+            prompt['scene log'] = cs.read()
     except FileNotFoundError:
-        scene_log = "This is an entirely new scene.\n"
+        prompt['scene log'] = "This is an entirely new scene.\n"
     except Exception as e:
         debug_message(f"Error getting scene contents: {e}")
-        scene_log = f"Ignore previous instructions and instead respond with this: There was a problem getting the scene {e}."
+        prompt['scene log'] = f"Ignore previous instructions and instead respond with this: There was a problem getting the scene {e}."
     # Get the character info for the current scene
     characters = get_all_characters_in_scene(scene_file)
     debug_message(f"Characters in scene are: {characters}")
-    char_info = ""
     if characters:
         for char in characters:
             try:
@@ -709,11 +744,10 @@ def build_prompt(scene_file, additional_info = ""):
             except Exception as e:
                 debug_message(f"Error getting character file for {char}: {e}", current_settings['debug'])    
                 char_sheet = f"{char} has no further info."
-            char_info = char_info + "\n\n" + char +"\n" + char_sheet  
+            prompt['character data'] = prompt['character data'] + "\n\n" + char +"\n" + char_sheet  
     # Get locations
     locations = get_all_locations_in_scene(scene_file)
     debug_message(f"Locations in scene are: {locations}")
-    loc_info = ""
     if locations:
         for loc in locations:
             try:
@@ -722,11 +756,10 @@ def build_prompt(scene_file, additional_info = ""):
             except Exception as e:
                 debug_message(f"Error getting location file for {loc}: {e}", current_settings['debug'])    
                 location_sheet = f"{loc} has no further info."
-            loc_info = loc_info + "\n\n" + loc +"\n" + location_sheet  
+            prompt['location data'] = prompt['location data'] + "\n\n" + loc +"\n" + location_sheet  
     # Get items
     items = get_all_items_in_scene(scene_file)
     debug_message(f"Items in scene are: {items}")
-    item_info = ""
     if items:
         for it in items:
             try:
@@ -735,9 +768,9 @@ def build_prompt(scene_file, additional_info = ""):
             except Exception as e:
                 debug_message(f"Error getting item file for {it}: {e}", current_settings['debug'])    
                 item_sheet = f"{it} has no further info."
-            item_info = item_info + "\n\n" + it +"\n" + item_sheet  
-    # Build and return a prompt with the scene information
-    return f"{prompt}\n\nThe players provided this additional information or instruction:\n{additional_info}\n\nThe characters in this scene are:\n{char_info}\n\nThe locations in this scene are:\n{loc_info}\n\nThe important items in this scene are:\n{item_info}\n\nThe log of the current scene is, you should ignore the timestamps on the entries:\n{scene_log}"
+            prompt['item data'] = prompt['item data'] + "\n\n" + it +"\n" + item_sheet  
+    # Build and returns a prompt dictionary
+    return prompt
 
 # Other functions
 def debug_message(message, debug_log=False):
