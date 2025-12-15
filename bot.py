@@ -819,7 +819,7 @@ def get_formatted_date():
 def write_gmbot_settings():
     # writes current settings to the gmbot.json file
     try:
-        with open('gmbot.json', 'w') as configfile:
+        with open(Path(current_settings['Obsidian Vault Path']) / 'gmbot.json', 'w') as configfile:
                 json.dump(current_settings, configfile)
         debug_message('Wrote settings to config file', current_settings['debug'])
     except Exception as err:
@@ -892,7 +892,7 @@ aliases:
 
     try:
         # Load the settings file
-        with open('gmbot.json', 'r') as configfile:
+        with open(Path(current_settings['Obsidian Vault Path']) / 'gmbot.json', 'r') as configfile:
             temp_current_settings = json.load(configfile)
             if temp_current_settings['Settings Version'] != current_settings['Settings Version']:
                 debug_message('Updating Settings version')
@@ -1015,7 +1015,8 @@ def ensure_current_scene_exists(file_path):
 
 def append_to_scene(file_path, author, content):
     """Append content to the current scene with timestamp."""
-    formatted_content = f"{content.replace('\n', '\r\n')}\r\n\n"
+    formatted_content = content.replace('\n', '\r\n')
+    formatted_content = f"{formatted_content}\r\n\n"
     try:
         with open(file_path, 'a', encoding='utf-8') as f:
             f.write(formatted_content)
