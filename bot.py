@@ -1015,8 +1015,7 @@ def ensure_current_scene_exists(file_path):
 
 def append_to_scene(file_path, author, content):
     """Append content to the current scene with timestamp."""
-    current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-    formatted_content = f"{current_time}: <{author}> {content}\n"
+    formatted_content = f"{content.replace('\n', '\r\n')}\r\n\n"
     try:
         with open(file_path, 'a', encoding='utf-8') as f:
             f.write(formatted_content)
@@ -1102,7 +1101,7 @@ async def on_message(message):
                 base_content += f"\n\nAttachments:\n" + "\n".join(f"- {link}" for link in attachment_links)
             # Default to daily note
             await update_bot_status("saving")
-            debug_message(f"Adding message {message.id} content ({message.content}) to current scene", current_settings['debug'])
+            debug_message(f"Adding message {message.id} content ({repr(message.content)}) to current scene", current_settings['debug'])
             current_scene_path = get_current_scene_path()
             ensure_current_scene_exists(current_scene_path)
             append_to_scene(current_scene_path, message.author.display_name, base_content)    
