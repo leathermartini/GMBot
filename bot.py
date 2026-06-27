@@ -1,3 +1,5 @@
+# mini version of GMBot - just logs to a folder. Called WatcherHelper
+
 import os
 import json
 import discord
@@ -18,12 +20,6 @@ intents.members = False
 intents.presences = False
 
 bot = discord.Bot(intents=intents)
-
-@bot.command(description="Starts a new scene, changing the logging file.")
-async def scene(ctx, new_scene: discord.Option(str)): #Creates slash command /scene
-    current_settings['Current Scene'] = new_scene
-    write_gmbot_settings()
-    await ctx.respond(f"--------------------- {new_scene} ---------------------")
 
 #bot = discord.Client(intents=intents)
 
@@ -76,7 +72,7 @@ def get_gmbot_settings():
             'template': 'Settings/Default Scene Template.md',
             'debug': False,
             # The following are pulled from globals
-            'Current Scene': os.getenv('CURRENT_SCENE'),
+            'Current Scene': 'current_scene',
             'Bot Channel': os.getenv('BOT_CHANNEL_NAME'),
             'Allowed Guild ids': os.getenv('ALLOWED_GUILD_IDS'),
             'Bot Discord Token': os.getenv('DISCORD_TOKEN'),
@@ -94,7 +90,7 @@ def get_gmbot_settings():
         write_gmbot_settings()
         debug_message('No config file found, creating from defaults.', current_settings['debug'])
     except Exception as err:
-        debug_message(f"Error reading GMBot config file: {err}", current_settings['debug'])
+        debug_message(f"Error reading WatcherHelper config file: {err}", current_settings['debug'])
     
     return
 
@@ -127,12 +123,12 @@ def get_current_scene_path():
     vault_path = Path(current_settings['Obsidian Vault Path'])
     if current_settings['folder']:
         # Create the folder if it doesn't exist
-        debug_message(f"GMBot Scene location specified, ensuring {vault_path}/{current_settings['folder']}/{filename} exists...", current_settings['debug'])
+        debug_message(f"WatcherHelper Scene location specified, ensuring {vault_path}/{current_settings['folder']}/{filename} exists...", current_settings['debug'])
         folder_path = vault_path / current_settings['folder']
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path / filename
     else:
-        debug_message(f"No GMBot Scene directory specified. Defaulting to {vault_path}/{filename}...", current_settings['debug'])
+        debug_message(f"No WatcherHelper Scene directory specified. Defaulting to {vault_path}/{filename}...", current_settings['debug'])
         return vault_path / filename
     
 def parse_template_string(template_string):
@@ -240,6 +236,7 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     # Only process messages in the bot's assigned channel
+    debug_message(f"Got message:{message}")
     if message.channel.name == current_settings['Bot Channel'] and not message.author.bot:
         try:
             # Format the base content
@@ -265,6 +262,7 @@ async def on_message(message):
 
 # Run the bot
 if __name__ == "__main__":
+    debug_message(f"Current env path is {os.getenv('OBSIDIAN_VAULT_PATH')}")
     get_gmbot_settings()
     if not current_settings['Bot Discord Token']:
         raise ValueError("Discord token not found in .env file")
